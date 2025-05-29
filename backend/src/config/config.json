@@ -1,0 +1,24 @@
+{
+  "development": {
+    "username": "postgres",
+    "password": "AskerY786.@",
+    "database": "iafa_software",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  },
+  "test": {
+    "username": "postgres",
+    "password": "AskerY786.@",
+    "database": "iafa_software_test",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  },
+  "production": {
+    "username": "postgres",
+    "password": "AskerY786.@",
+    "database": "iafa_software_production",
+    "host": "127.0.0.1",
+    "dialect": "postgres",
+    "logging": false
+  }
+}
