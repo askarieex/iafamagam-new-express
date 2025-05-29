@@ -256,13 +256,38 @@ class TransactionService {
 
                 // Check if we're taking from cash or bank
                 let balanceToCheck;
-                if (['cash'].includes(data.cash_type)) {
+                let sourceAmount;
+
+                if (data.cash_type === 'multiple') {
+                    // For 'multiple' (both), validate both cash and bank balances separately
+                    const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
+                    const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
+
+                    // Calculate how much of this source will come from cash vs bank
+                    const sourceCashAmount = parseFloat(source.amount) * cashRatio;
+                    const sourceBankAmount = parseFloat(source.amount) * bankRatio;
+
+                    // Check cash balance
+                    if (sourceCashAmount > 0 && parseFloat(ledgerHead.cash_balance) < sourceCashAmount) {
+                        throw new Error(`Insufficient cash balance in ledger head: ${ledgerHead.name}`);
+                    }
+
+                    // Check bank balance
+                    if (sourceBankAmount > 0 && parseFloat(ledgerHead.bank_balance) < sourceBankAmount) {
+                        throw new Error(`Insufficient bank balance in ledger head: ${ledgerHead.name}`);
+                    }
+
+                    // We've already done the checks, so we can continue to the next source
+                    continue;
+                } else if (['cash'].includes(data.cash_type)) {
                     balanceToCheck = parseFloat(ledgerHead.cash_balance);
+                    sourceAmount = parseFloat(source.amount);
                 } else {
                     balanceToCheck = parseFloat(ledgerHead.bank_balance);
+                    sourceAmount = parseFloat(source.amount);
                 }
 
-                if (balanceToCheck < parseFloat(source.amount)) {
+                if (balanceToCheck < sourceAmount) {
                     throw new Error(`Insufficient balance in ledger head: ${ledgerHead.name}`);
                 }
             }
@@ -291,8 +316,15 @@ class TransactionService {
             }, { transaction: t });
 
             // Update the target ledger head balance
-            const cashBalanceTarget = ['cash'].includes(data.cash_type) ? parseFloat(data.amount) : 0;
-            const bankBalanceTarget = ['cash'].includes(data.cash_type) ? 0 : parseFloat(data.amount);
+            let cashBalanceTarget, bankBalanceTarget;
+
+            if (data.cash_type === 'multiple') {
+                cashBalanceTarget = parseFloat(data.cash_amount || 0);
+                bankBalanceTarget = parseFloat(data.bank_amount || 0);
+            } else {
+                cashBalanceTarget = ['cash'].includes(data.cash_type) ? parseFloat(data.amount) : 0;
+                bankBalanceTarget = ['cash'].includes(data.cash_type) ? 0 : parseFloat(data.amount);
+            }
 
             await this.updateLedgerHeadBalance(
                 data.ledger_head_id,
@@ -314,8 +346,19 @@ class TransactionService {
                 }, { transaction: t });
 
                 // Update the source ledger head balance
-                const cashBalanceSource = ['cash'].includes(data.cash_type) ? parseFloat(source.amount) : 0;
-                const bankBalanceSource = ['cash'].includes(data.cash_type) ? 0 : parseFloat(source.amount);
+                let cashBalanceSource, bankBalanceSource;
+
+                if (data.cash_type === 'multiple') {
+                    // Calculate the proper proportion for cash and bank
+                    const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
+                    const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
+
+                    cashBalanceSource = parseFloat(source.amount) * cashRatio;
+                    bankBalanceSource = parseFloat(source.amount) * bankRatio;
+                } else {
+                    cashBalanceSource = ['cash'].includes(data.cash_type) ? parseFloat(source.amount) : 0;
+                    bankBalanceSource = ['cash'].includes(data.cash_type) ? 0 : parseFloat(source.amount);
+                }
 
                 await this.updateLedgerHeadBalance(
                     source.ledger_head_id,

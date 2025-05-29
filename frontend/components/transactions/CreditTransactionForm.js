@@ -234,62 +234,28 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                         ledgerHeads,
                         donors
                     });
+                } else if (accountsData.length > 0) {
+                    // For new transactions, set default account and credit ledger head
+                    const defaultAccount = accountsData[0].id;
 
-                    // Force a re-fetch of accounts, ledger heads, and donors if they're not loaded
-                    if (accounts.length === 0 || ledgerHeads.length === 0) {
-                        try {
-                            const [accountsRes, ledgerHeadsRes, donorsRes] = await Promise.all([
-                                api.get(`${API_CONFIG.API_PREFIX}/accounts`),
-                                api.get(`${API_CONFIG.API_PREFIX}/ledger-heads`),
-                                api.get(`${API_CONFIG.API_PREFIX}/donors`)
-                            ]);
+                    // Find the first credit ledger head for this account
+                    const defaultCreditLedger = ledgerHeadsData.find(
+                        head => head.account_id.toString() === defaultAccount.toString() &&
+                            head.head_type === 'credit'
+                    );
 
-                            setAccounts(accountsRes.data?.data || []);
-                            setLedgerHeads(ledgerHeadsRes.data?.data || []);
-                            setDonors(donorsRes.data?.data || []);
-
-                            console.log('Loaded missing data:', {
-                                accounts: accountsRes.data?.data || [],
-                                ledgerHeads: ledgerHeadsRes.data?.data || [],
-                                donors: donorsRes.data?.data || []
-                            });
-                        } catch (err) {
-                            console.error('Error loading missing reference data:', err);
-                        }
-                    }
-
-                    // For booklet transactions that have an inactive booklet, add it to the list
-                    if (transaction.booklet_id && transaction.booklet && !transaction.booklet.is_active) {
-                        console.log('Adding inactive booklet to list:', transaction.booklet);
-                        setBooklets(prev => [...prev, transaction.booklet]);
-                    }
-
-                    // Extract transaction items if available for splits
-                    const splits = transaction.items && transaction.items.length > 0
-                        ? transaction.items
-                            .filter(item => item.ledger_head_id !== transaction.ledger_head_id) // Exclude main ledger head
-                            .map(item => ({
-                                ledger_head_id: item.ledger_head_id,
-                                amount: item.amount,
-                                side: item.side
-                            }))
-                        : [];
-
-                    setFormData({
-                        id: transaction.id,
-                        account_id: transaction.account_id?.toString() || '',
-                        ledger_head_id: transaction.ledger_head_id?.toString() || '',
-                        donor_id: transaction.donor_id?.toString() || '',
-                        booklet_id: transaction.booklet_id?.toString() || '',
-                        receipt_no: transaction.receipt_no?.toString() || '',
-                        amount: transaction.amount?.toString() || '',
-                        bank_amount: transaction.bank_amount?.toString() || '0',
-                        cash_amount: transaction.cash_amount?.toString() || '0',
-                        cash_type: transaction.cash_type || 'cash',
-                        tx_date: transaction.tx_date || new Date().toISOString().split('T')[0],
-                        description: transaction.description || '',
-                        splits: splits
+                    console.log('Setting default credit ledger:', {
+                        defaultAccount,
+                        defaultCreditLedger: defaultCreditLedger ? defaultCreditLedger.id : 'None found'
                     });
+
+                    // Set default values for new transaction
+                    setFormData(prev => ({
+                        ...prev,
+                        account_id: defaultAccount.toString(),
+                        ledger_head_id: defaultCreditLedger ? defaultCreditLedger.id.toString() : '',
+                        tx_date: new Date().toISOString().split('T')[0]
+                    }));
                 }
             } catch (error) {
                 console.error('Error fetching form data:', error);
@@ -351,6 +317,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
         return ledgerHeads.filter(head =>
             head &&
             head.account_id === formData.account_id &&
+            head.head_type === 'credit' && // Only show credit type ledger heads
             head.name &&
             head.name.toLowerCase().includes(ledgerHeadSearchQuery.toLowerCase())
         );
@@ -478,18 +445,18 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
 
         // Special handling for account_id (reset ledger_head_id)
         if (name === 'account_id') {
-            // Get ledger heads for the selected account
-            const accountLedgerHeads = ledgerHeads.filter(
-                head => head && head.account_id === value
+            // Get credit type ledger heads for the selected account
+            const accountCreditLedgerHeads = ledgerHeads.filter(
+                head => head && head.account_id === value && head.head_type === 'credit'
             );
 
-            console.log(`Selected account ${value}, found ${accountLedgerHeads.length} ledger heads`);
+            console.log(`Selected account ${value}, found ${accountCreditLedgerHeads.length} credit ledger heads`);
 
-            // Update form with the new account and first available ledger head
+            // Update form with the new account and first available credit ledger head
             setFormData(prev => ({
                 ...prev,
                 account_id: value,
-                ledger_head_id: accountLedgerHeads.length > 0 ? accountLedgerHeads[0].id : ''
+                ledger_head_id: accountCreditLedgerHeads.length > 0 ? accountCreditLedgerHeads[0].id : ''
             }));
 
             // Clear any errors
@@ -1101,14 +1068,14 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                             className={`px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 ${formData.account_id === account.id ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                // Get ledger heads for the selected account
-                                                                const accountLedgerHeads = ledgerHeads.filter(
-                                                                    head => head && head.account_id === account.id
+                                                                // Get credit type ledger heads for the selected account
+                                                                const accountCreditLedgerHeads = ledgerHeads.filter(
+                                                                    head => head && head.account_id === account.id && head.head_type === 'credit'
                                                                 );
                                                                 setFormData(prev => ({
                                                                     ...prev,
                                                                     account_id: account.id,
-                                                                    ledger_head_id: accountLedgerHeads.length > 0 ? accountLedgerHeads[0].id : ''
+                                                                    ledger_head_id: accountCreditLedgerHeads.length > 0 ? accountCreditLedgerHeads[0].id : ''
                                                                 }));
                                                                 setAccountSearchQuery('');
                                                                 setIsAccountDropdownOpen(false);

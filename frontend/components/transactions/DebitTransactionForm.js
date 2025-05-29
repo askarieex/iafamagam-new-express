@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
     FaSave,
     FaTimes,
-    FaPlus,
-    FaTrash,
     FaMoneyBillWave,
     FaUniversity,
-    FaExclamationTriangle
+    FaExclamationTriangle,
+    FaSearch,
+    FaCalendarAlt
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
@@ -20,210 +20,347 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     // Form data
     const [formData, setFormData] = useState({
         account_id: '',
-        ledger_head_id: '',
+        source_ledger_head_id: '', // Credit ledger head (source of funds)
+        ledger_head_id: '',        // Debit ledger head (destination)
         amount: '',
+        cash_amount: '',
+        bank_amount: '',
         cash_type: 'cash',
         tx_date: new Date().toISOString().split('T')[0], // Current date in YYYY-MM-DD format
         description: '',
-        splits: []
+        voucher_number: '',
+        manual_voucher: false
     });
 
     // Form validation errors
     const [errors, setErrors] = useState({});
 
-    // Split mode
-    const [useSplits, setUseSplits] = useState(false);
-
     // Options for dropdowns
     const [accounts, setAccounts] = useState([]);
     const [ledgerHeads, setLedgerHeads] = useState([]);
 
+    // Search and dropdown state
+    const [accountSearchQuery, setAccountSearchQuery] = useState('');
+    const [sourceLedgerSearchQuery, setSourceLedgerSearchQuery] = useState('');
+    const [debitLedgerSearchQuery, setDebitLedgerSearchQuery] = useState('');
+    const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
+    const [isSourceLedgerDropdownOpen, setIsSourceLedgerDropdownOpen] = useState(false);
+    const [isDebitLedgerDropdownOpen, setIsDebitLedgerDropdownOpen] = useState(false);
+
+    // Refs for dropdown click outside handling
+    const accountDropdownRef = useRef(null);
+    const sourceLedgerDropdownRef = useRef(null);
+    const debitLedgerDropdownRef = useRef(null);
+
     // Configure axios
     const api = axios.create({
-        baseURL: API_CONFIG.BASE_URL.replace('/api', ''),
-        timeout: 5000,
+        baseURL: API_CONFIG.BASE_URL,
+        timeout: 8000,
         headers: {
             'Content-Type': 'application/json'
         }
     });
 
-    // Fetch form data
-    const fetchFormData = async () => {
-        try {
-            setLoading(true);
-            setError(null);
+    // Close dropdowns when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (accountDropdownRef.current && !accountDropdownRef.current.contains(event.target)) {
+                setIsAccountDropdownOpen(false);
+            }
+            if (sourceLedgerDropdownRef.current && !sourceLedgerDropdownRef.current.contains(event.target)) {
+                setIsSourceLedgerDropdownOpen(false);
+            }
+            if (debitLedgerDropdownRef.current && !debitLedgerDropdownRef.current.contains(event.target)) {
+                setIsDebitLedgerDropdownOpen(false);
+            }
+        }
 
-            const [accountsRes, ledgerHeadsRes] = await Promise.all([
-                api.get('/api/accounts'),
-                api.get('/api/ledger-heads')
-            ]);
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
 
-            setAccounts(accountsRes.data.data || []);
-            setLedgerHeads(ledgerHeadsRes.data.data || []);
+    // Fetch accounts and ledger heads
+    useEffect(() => {
+        const fetchFormData = async () => {
+            try {
+                setLoading(true);
+                setError(null);
 
-            // If editing, initialize form with transaction data
-            if (isEditing && transaction) {
-                console.log('Initializing form with transaction data for editing:', transaction);
+                const [accountsRes, ledgerHeadsRes] = await Promise.all([
+                    api.get('/api/accounts'),
+                    api.get('/api/ledger-heads')
+                ]);
 
-                // Check if this is a split transaction by looking for transaction items
-                const hasSplits = transaction.items && transaction.items.length > 1;
-                setUseSplits(hasSplits);
+                setAccounts(accountsRes.data.data || []);
+                setLedgerHeads(ledgerHeadsRes.data.data || []);
 
-                // Get splits from transaction items
-                let splits = [];
-                if (hasSplits) {
-                    // All items except the target ledger head are source splits
-                    splits = transaction.items
-                        .filter(item => item.side === '-')
-                        .map(item => ({
-                            ledger_head_id: item.ledger_head_id.toString(),
-                            amount: item.amount.toString()
-                        }));
-                }
+                // If editing, initialize form with transaction data
+                if (isEditing && transaction) {
+                    console.log('Initializing form with transaction data for editing:', transaction);
 
-                setFormData({
-                    id: transaction.id,
-                    account_id: transaction.account_id?.toString() || '',
-                    ledger_head_id: transaction.ledger_head_id?.toString() || '',
-                    amount: transaction.amount?.toString() || '',
-                    cash_type: transaction.cash_type || 'cash',
-                    tx_date: transaction.tx_date || new Date().toISOString().split('T')[0],
-                    description: transaction.description || '',
-                    splits: splits.length > 0 ? splits : [{ ledger_head_id: '', amount: '' }]
-                });
-            } else if (accountsRes.data.data.length > 0) {
-                // Default account selection for new transactions
-                const defaultAccount = accountsRes.data.data[0].id;
-                const accountLedgerHeads = ledgerHeadsRes.data.data.filter(
-                    head => head.account_id === defaultAccount
-                );
+                    // Find source ledger head (the one with negative side in transaction items)
+                    let sourceLedgerHeadId = '';
+                    if (transaction.items && transaction.items.length > 0) {
+                        const sourceItem = transaction.items.find(item => item.side === '-');
+                        if (sourceItem) {
+                            sourceLedgerHeadId = sourceItem.ledger_head_id.toString();
+                        }
+                    }
+
+                    setFormData({
+                        account_id: transaction.account_id?.toString() || '',
+                        source_ledger_head_id: sourceLedgerHeadId,
+                        ledger_head_id: transaction.ledger_head_id?.toString() || '',
+                        amount: transaction.amount?.toString() || '',
+                        cash_amount: transaction.cash_amount?.toString() || '',
+                        bank_amount: transaction.bank_amount?.toString() || '',
+                        cash_type: transaction.cash_type === 'multiple' ? 'multiple' : transaction.cash_type || 'cash',
+                        tx_date: transaction.tx_date || new Date().toISOString().split('T')[0],
+                        description: transaction.description || '',
+                        voucher_number: transaction.voucher_number || '',
+                        manual_voucher: transaction.manual_voucher || false
+                    });
+                } else if (accountsRes.data.data.length > 0) {
+                    // Default account selection for new transactions
+                    const defaultAccount = accountsRes.data.data[0].id;
+
+                    // Find first credit and debit ledger heads for this account
+                    const creditLedgerHead = ledgerHeadsRes.data.data.find(
+                        head => head.account_id.toString() === defaultAccount.toString() && head.head_type === 'credit'
+                    );
+
+                    const debitLedgerHead = ledgerHeadsRes.data.data.find(
+                        head => head.account_id.toString() === defaultAccount.toString() && head.head_type === 'debit'
+                    );
 
                     setFormData(prev => ({
                         ...prev,
-                    account_id: defaultAccount,
-                    ledger_head_id: accountLedgerHeads.length > 0 ? accountLedgerHeads[0].id : ''
+                        account_id: defaultAccount,
+                        source_ledger_head_id: creditLedgerHead ? creditLedgerHead.id : '',
+                        ledger_head_id: debitLedgerHead ? debitLedgerHead.id : ''
                     }));
+                }
+
+                setLoading(false);
+            } catch (err) {
+                console.error('Error fetching form data:', err);
+                setError('Failed to load form data. Please try again.');
+                setLoading(false);
             }
+        };
 
-            setLoading(false);
-        } catch (err) {
-            console.error('Error fetching form data:', err);
-            setError('Failed to load form data. Please try again.');
-            setLoading(false);
-        }
-    };
-
-    // Load data on component mount
-    useEffect(() => {
         fetchFormData();
     }, []);
 
-    // Filter ledger heads based on selected account
-    const filteredLedgerHeads = ledgerHeads.filter(
-        head => head.account_id === formData.account_id
+    // Filter ledger heads based on type and account
+    const creditLedgerHeads = ledgerHeads.filter(
+        head => head.account_id.toString() === formData.account_id.toString() &&
+            head.head_type === 'credit' &&
+            head.name.toLowerCase().includes(sourceLedgerSearchQuery.toLowerCase())
     );
+
+    const debitLedgerHeads = ledgerHeads.filter(
+        head => head.account_id.toString() === formData.account_id.toString() &&
+            head.head_type === 'debit' &&
+            head.name.toLowerCase().includes(debitLedgerSearchQuery.toLowerCase())
+    );
+
+    // Calculate total amount from bank and cash amounts
+    const calculateTotalAmount = () => {
+        const bankAmount = parseFloat(formData.bank_amount) || 0;
+        const cashAmount = parseFloat(formData.cash_amount) || 0;
+        return bankAmount + cashAmount;
+    };
+
+    // Update amount when bank_amount or cash_amount changes
+    useEffect(() => {
+        if (formData.cash_type === 'multiple') {
+            const totalAmount = calculateTotalAmount();
+            setFormData(prev => ({
+                ...prev,
+                amount: totalAmount > 0 ? totalAmount : ''
+            }));
+        }
+    }, [formData.bank_amount, formData.cash_amount, formData.cash_type]);
+
+    // Handle account selection
+    const handleAccountSelect = (account) => {
+        // Find first credit and debit ledger heads for this account
+        const creditLedgerHead = ledgerHeads.find(
+            head => head.account_id.toString() === account.id.toString() && head.head_type === 'credit'
+        );
+
+        const debitLedgerHead = ledgerHeads.find(
+            head => head.account_id.toString() === account.id.toString() && head.head_type === 'debit'
+        );
+
+        setFormData(prev => ({
+            ...prev,
+            account_id: account.id.toString(),
+            source_ledger_head_id: creditLedgerHead ? creditLedgerHead.id.toString() : '',
+            ledger_head_id: debitLedgerHead ? debitLedgerHead.id.toString() : ''
+        }));
+
+        setIsAccountDropdownOpen(false);
+        setAccountSearchQuery('');
+    };
+
+    // Handle ledger head selections
+    const handleSourceLedgerSelect = (ledger) => {
+        // Update form data with the selected ledger
+        setFormData(prev => ({
+            ...prev,
+            source_ledger_head_id: ledger.id.toString()
+        }));
+
+        // Clear source ledger head error
+        setErrors(prev => ({
+            ...prev,
+            source_ledger_head_id: null
+        }));
+
+        // Check if we need to update payment method based on available balances
+        const cashBalance = parseFloat(ledger.cash_balance || 0);
+        const bankBalance = parseFloat(ledger.bank_balance || 0);
+
+        // If current payment method is not valid for this ledger, switch to a valid one
+        if (formData.cash_type === 'cash' && cashBalance <= 0) {
+            if (bankBalance > 0) {
+                setFormData(prev => ({ ...prev, cash_type: 'bank' }));
+            }
+        } else if (formData.cash_type === 'bank' && bankBalance <= 0) {
+            if (cashBalance > 0) {
+                setFormData(prev => ({ ...prev, cash_type: 'cash' }));
+            }
+        } else if (formData.cash_type === 'multiple' && (cashBalance <= 0 && bankBalance <= 0)) {
+            // Both are zero - no valid option, leave as is but will be disabled
+        } else if (formData.cash_type === 'multiple' && (cashBalance <= 0 || bankBalance <= 0)) {
+            // One is zero, switch to the other
+            if (cashBalance <= 0 && bankBalance > 0) {
+                setFormData(prev => ({ ...prev, cash_type: 'bank' }));
+            } else if (bankBalance <= 0 && cashBalance > 0) {
+                setFormData(prev => ({ ...prev, cash_type: 'cash' }));
+            }
+        }
+
+        // Validate current amount with new ledger head (if amount is already entered)
+        if (formData.amount && formData.cash_type !== 'multiple') {
+            const error = validateAmount(formData.cash_type, formData.amount, ledger);
+            setErrors(prev => ({
+                ...prev,
+                amount: error
+            }));
+        } else if (formData.cash_type === 'multiple') {
+            if (formData.cash_amount) {
+                const cashError = validateAmount('cash', formData.cash_amount, ledger);
+                setErrors(prev => ({
+                    ...prev,
+                    cash_amount: cashError
+                }));
+            }
+            if (formData.bank_amount) {
+                const bankError = validateAmount('bank', formData.bank_amount, ledger);
+                setErrors(prev => ({
+                    ...prev,
+                    bank_amount: bankError
+                }));
+            }
+        }
+
+        setIsSourceLedgerDropdownOpen(false);
+        setSourceLedgerSearchQuery('');
+    };
+
+    const handleDebitLedgerSelect = (ledger) => {
+        setFormData(prev => ({
+            ...prev,
+            ledger_head_id: ledger.id.toString()
+        }));
+        setIsDebitLedgerDropdownOpen(false);
+        setDebitLedgerSearchQuery('');
+    };
+
+    // Add sourceLedger variable before the return statement
+    const sourceLedger = formData.source_ledger_head_id
+        ? ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id)
+        : null;
 
     // Handle form input changes
     const handleInputChange = (e) => {
-        const { name, value } = e.target;
+        const { name, value, type, checked } = e.target;
 
-        // Special handling for account_id (reset ledger_head_id)
-        if (name === 'account_id') {
-            const accountLedgerHeads = ledgerHeads.filter(
-                head => head.account_id === value
-            );
-
+        if (type === 'checkbox') {
             setFormData(prev => ({
                 ...prev,
-                [name]: value,
-                ledger_head_id: accountLedgerHeads.length > 0 ? accountLedgerHeads[0].id : ''
+                [name]: checked
             }));
+        } else if (name === 'cash_type') {
+            if (value === 'multiple') {
+                // If switching to multiple (Both), initialize cash and bank amounts
+                setFormData(prev => ({
+                    ...prev,
+                    [name]: value,
+                    cash_amount: prev.amount || '',
+                    bank_amount: ''
+                }));
+                // Clear any existing amount errors
+                setErrors(prev => ({
+                    ...prev,
+                    amount: null,
+                    cash_amount: null,
+                    bank_amount: null
+                }));
+            } else {
+                // If switching to cash or bank, use the total amount
+                setFormData(prev => ({
+                    ...prev,
+                    [name]: value,
+                    amount: prev.amount || calculateTotalAmount() || ''
+                }));
+
+                // Only validate if the user has already entered an amount
+                if (formData.amount) {
+                    const error = validateAmount(value, formData.amount);
+                    setErrors(prev => ({
+                        ...prev,
+                        amount: error,
+                        cash_amount: null,
+                        bank_amount: null
+                    }));
+                }
+            }
+        } else if (['amount', 'cash_amount', 'bank_amount'].includes(name)) {
+            // For amount fields, update but only validate on blur or if field already has an error
+            setFormData(prev => ({
+                ...prev,
+                [name]: value
+            }));
+
+            // Only validate if the field has been touched before or user is actively editing a field with errors
+            if (errors[name]) {
+                let validationType = name === 'amount' ? formData.cash_type : (name === 'cash_amount' ? 'cash' : 'bank');
+                const error = value ? validateAmount(validationType, value) : 'Amount is required';
+                setErrors(prev => ({
+                    ...prev,
+                    [name]: error
+                }));
+            }
         } else {
+            // Standard update for other fields
             setFormData(prev => ({
                 ...prev,
-                [name]: name === 'amount' ? (value === '' ? '' : parseFloat(value)) : value
+                [name]: value
             }));
-        }
 
-        // Clear validation error for this field
-        if (errors[name]) {
-            setErrors(prev => ({
-                ...prev,
-                [name]: null
-            }));
-        }
-    };
-
-    // Toggle split mode
-    const toggleSplitMode = () => {
-        if (useSplits) {
-            // Clear splits when disabling
-            setFormData(prev => ({
-                ...prev,
-                splits: []
-            }));
-        } else {
-            // Add initial split when enabling
-            setFormData(prev => ({
-                ...prev,
-                splits: [{ ledger_head_id: '', amount: '' }]
-            }));
-        }
-
-        setUseSplits(!useSplits);
-    };
-
-    // Add a new split
-    const addSplit = () => {
-        setFormData(prev => ({
-            ...prev,
-            splits: [
-                ...prev.splits,
-                { ledger_head_id: '', amount: '' }
-            ]
-        }));
-    };
-
-    // Remove a split
-    const removeSplit = (index) => {
-        setFormData(prev => {
-            const newSplits = [...prev.splits];
-            newSplits.splice(index, 1);
-            return {
-                ...prev,
-                splits: newSplits
-            };
-        });
-
-        // Clear any errors for this split
-        setErrors(prev => {
-            const newErrors = { ...prev };
-            delete newErrors[`splits[${index}].ledger_head_id`];
-            delete newErrors[`splits[${index}].amount`];
-            return newErrors;
-        });
-    };
-
-    // Update a split
-    const updateSplit = (index, field, value) => {
-        setFormData(prev => {
-            const newSplits = [...prev.splits];
-            newSplits[index] = {
-                ...newSplits[index],
-                [field]: field === 'amount' ? (value === '' ? '' : parseFloat(value)) : value
-            };
-            return {
-                ...prev,
-                splits: newSplits
-            };
-        });
-
-        // Clear validation error for this field
-        if (errors[`splits[${index}].${field}`]) {
-            setErrors(prev => ({
-                ...prev,
-                [`splits[${index}].${field}`]: null
-            }));
+            // Clear validation error for this field
+            if (errors[name]) {
+                setErrors(prev => ({
+                    ...prev,
+                    [name]: null
+                }));
+            }
         }
     };
 
@@ -233,37 +370,59 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
         // Required fields
         if (!formData.account_id) newErrors.account_id = 'Account is required';
-        if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Ledger head is required';
+        if (!formData.source_ledger_head_id) newErrors.source_ledger_head_id = 'Credit ledger head is required';
+        if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Debit ledger head is required';
         if (!formData.tx_date) newErrors.tx_date = 'Date is required';
+        if (!formData.voucher_number) newErrors.voucher_number = 'Voucher number is required';
 
-        // Amount validation
-        if (!formData.amount) {
-            newErrors.amount = 'Amount is required';
-        } else if (isNaN(formData.amount) || formData.amount <= 0) {
-            newErrors.amount = 'Amount must be greater than zero';
+        // Validate voucher format if manual
+        if (formData.manual_voucher && formData.voucher_number) {
+            const voucherRegex = /^CV-\d+\/\d{2}\/\d{2}$/;
+            if (!voucherRegex.test(formData.voucher_number)) {
+                newErrors.voucher_number = 'Format must be CV-serial/MM/YY';
+            }
         }
 
-        // Validate splits if enabled
-        if (useSplits && formData.splits.length > 0) {
-            let totalSplitAmount = 0;
-
-            formData.splits.forEach((split, index) => {
-                if (!split.ledger_head_id) {
-                    newErrors[`splits[${index}].ledger_head_id`] = 'Ledger head is required';
+        // Amount validation
+        if (formData.cash_type === 'multiple') {
+            if (!formData.cash_amount && !formData.bank_amount) {
+                newErrors.cash_amount = 'At least one amount is required';
+                newErrors.bank_amount = 'At least one amount is required';
+            } else {
+                if (formData.cash_amount && (isNaN(formData.cash_amount) || parseFloat(formData.cash_amount) < 0)) {
+                    newErrors.cash_amount = 'Amount must be valid and non-negative';
                 }
-
-                if (!split.amount) {
-                    newErrors[`splits[${index}].amount`] = 'Amount is required';
-                } else if (isNaN(split.amount) || split.amount <= 0) {
-                    newErrors[`splits[${index}].amount`] = 'Amount must be greater than zero';
-                } else {
-                    totalSplitAmount += parseFloat(split.amount);
+                if (formData.bank_amount && (isNaN(formData.bank_amount) || parseFloat(formData.bank_amount) < 0)) {
+                    newErrors.bank_amount = 'Amount must be valid and non-negative';
                 }
-            });
+            }
+        } else {
+            if (!formData.amount) {
+                newErrors.amount = 'Amount is required';
+            } else if (isNaN(formData.amount) || parseFloat(formData.amount) <= 0) {
+                newErrors.amount = 'Amount must be greater than zero';
+            }
+        }
 
-            // Check if split total matches the main amount
-            if (totalSplitAmount !== parseFloat(formData.amount)) {
-                newErrors.splits = `Split total (${formatCurrency(totalSplitAmount)}) does not match the transaction amount (${formatCurrency(formData.amount)})`;
+        // Check if source ledger has sufficient balance
+        const sourceLedger = ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id);
+
+        if (sourceLedger) {
+            if (formData.cash_type === 'cash') {
+                if (parseFloat(formData.amount) > parseFloat(sourceLedger.cash_balance || 0)) {
+                    newErrors.amount = `Insufficient cash balance. Available: ${parseFloat(sourceLedger.cash_balance || 0).toFixed(2)}`;
+                }
+            } else if (formData.cash_type === 'bank') {
+                if (parseFloat(formData.amount) > parseFloat(sourceLedger.bank_balance || 0)) {
+                    newErrors.amount = `Insufficient bank balance. Available: ${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}`;
+                }
+            } else if (formData.cash_type === 'multiple') {
+                if (parseFloat(formData.cash_amount || 0) > parseFloat(sourceLedger.cash_balance || 0)) {
+                    newErrors.cash_amount = `Insufficient cash balance. Available: ${parseFloat(sourceLedger.cash_balance || 0).toFixed(2)}`;
+                }
+                if (parseFloat(formData.bank_amount || 0) > parseFloat(sourceLedger.bank_balance || 0)) {
+                    newErrors.bank_amount = `Insufficient bank balance. Available: ${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}`;
+                }
             }
         }
 
@@ -271,21 +430,9 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         return Object.keys(newErrors).length === 0;
     };
 
-    // Format currency amounts with Indian Rupee symbol
+    // Format currency
     const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 2
-        }).format(amount);
-    };
-
-    // Calculate total amount from splits
-    const calculateSplitTotal = () => {
-        if (!formData.splits || formData.splits.length === 0) return 0;
-        return formData.splits.reduce((total, split) => {
-            return total + (parseFloat(split.amount) || 0);
-        }, 0);
+        return parseFloat(amount).toFixed(2);
     };
 
     // Handle form submission
@@ -309,57 +456,54 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             // Prepare transaction data
             const transactionData = {
                 account_id: parseInt(formData.account_id),
-                ledger_head_id: !useSplits ? parseInt(formData.ledger_head_id) : null,
-                amount: parseFloat(formData.amount),
+                ledger_head_id: parseInt(formData.ledger_head_id),
+                amount: formData.cash_type === 'multiple'
+                    ? calculateTotalAmount()
+                    : parseFloat(formData.amount),
                 tx_type: 'debit',
                 cash_type: formData.cash_type,
                 tx_date: formData.tx_date,
                 description: formData.description || null,
-                splits: useSplits ? formData.splits.map(split => ({
-                    ledger_head_id: parseInt(split.ledger_head_id),
-                    amount: parseFloat(split.amount),
-                    side: '-'
-                })) : []
+                voucher_number: formData.voucher_number,
+                manual_voucher: formData.manual_voucher
             };
 
-            let response;
+            // For multiple cash type, add cash and bank amounts
+            if (formData.cash_type === 'multiple') {
+                transactionData.cash_amount = parseFloat(formData.cash_amount || 0);
+                transactionData.bank_amount = parseFloat(formData.bank_amount || 0);
+            }
 
+            // Add source ledger head to sources array
+            transactionData.sources = [{
+                ledger_head_id: parseInt(formData.source_ledger_head_id),
+                amount: formData.cash_type === 'multiple'
+                    ? calculateTotalAmount()
+                    : parseFloat(formData.amount)
+            }];
+
+            let response;
             if (isEditing) {
                 // Update existing transaction
-                console.log(`Updating transaction ${formData.id}...`);
                 response = await api.put(`/api/transactions/${formData.id}`, transactionData);
+            } else {
+                // Create new debit transaction
+                response = await api.post('/api/transactions/debit', transactionData);
+            }
 
             if (response.data && response.data.success) {
                 // Call onSuccess callback
                 if (onSuccess) {
-                        onSuccess(response.data.transaction || response.data.data);
-                    }
-                    // Show success message
-                    toast.success('Transaction updated successfully', {
-                        position: "top-right",
-                        autoClose: 3000
-                    });
-                } else {
-                    setError(response.data.message || 'Failed to update transaction');
+                    onSuccess(response.data.data || response.data.transaction);
                 }
-            } else {
-                // Create new transaction
-                console.log('Creating new transaction...');
-                response = await api.post('/api/transactions', transactionData);
 
-                if (response.data && response.data.success) {
-                    // Call onSuccess callback
-                    if (onSuccess) {
-                        onSuccess(response.data.transaction || response.data.data);
-                    }
-                    // Show success message
-                    toast.success('Transaction created successfully', {
-                        position: "top-right",
-                        autoClose: 3000
-                    });
+                // Show success message
+                toast.success(isEditing ? 'Transaction updated successfully' : 'Debit transaction created successfully', {
+                    position: "top-right",
+                    autoClose: 3000
+                });
             } else {
-                setError(response.data.message || 'Failed to create transaction');
-                }
+                setError(response.data?.message || 'Failed to process transaction');
             }
         } catch (err) {
             console.error(`Error ${isEditing ? 'updating' : 'creating'} transaction:`, err);
@@ -380,265 +524,839 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         }
     };
 
-    // Render form UI
+    // Update the validateAmount function to accept a specific ledger
+    const validateAmount = (type, value, specificLedger = null) => {
+        if (!value || parseFloat(value) <= 0) {
+            return "Amount must be greater than zero";
+        }
+
+        // Use provided ledger or find from state
+        const sourceLedger = specificLedger ||
+            ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id);
+
+        if (!sourceLedger) return null;
+
+        if (type === 'cash' && parseFloat(value) > parseFloat(sourceLedger.cash_balance || 0)) {
+            return `Exceeds available cash balance (₹${parseFloat(sourceLedger.cash_balance || 0).toFixed(2)})`;
+        }
+
+        if (type === 'bank' && parseFloat(value) > parseFloat(sourceLedger.bank_balance || 0)) {
+            return `Exceeds available bank balance (₹${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)})`;
+        }
+
+        return null;
+    };
+
+    // Create a styled banner for the balance display
+    const BalanceBanner = ({ ledgerId }) => {
+        const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
+        if (!ledger) return null;
+
+        const totalBalance = parseFloat(ledger.current_balance || 0);
+        const bankBalance = parseFloat(ledger.bank_balance || 0);
+        const cashBalance = parseFloat(ledger.cash_balance || 0);
+
+        return (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden">
+                <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        Available Balance: <span className="ml-2 text-indigo-700">{ledger.name}</span>
+                    </h3>
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-gray-200">
+                    <div className="p-4 text-center relative overflow-hidden">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                            <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            TOTAL BALANCE
+                        </div>
+                        <div className="text-2xl font-bold text-gray-800">
+                            ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 opacity-5">
+                            <svg className="w-20 h-20 text-gray-800" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                                <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div className="p-4 text-center relative overflow-hidden">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                            <svg className="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                            </svg>
+                            CASH IN BANK
+                        </div>
+                        <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                            ₹{bankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 opacity-5">
+                            <svg className="w-20 h-20 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div className="p-4 text-center relative overflow-hidden">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                            <svg className="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                            </svg>
+                            CASH IN HAND
+                        </div>
+                        <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                            ₹{cashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 opacity-5">
+                            <svg className="w-20 h-20 text-green-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // Component to calculate and display projected balance
+    const ProjectedBalance = ({ ledgerId, amountToDeduct, cashType }) => {
+        const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
+        if (!ledger) return null;
+
+        let newCashBalance = parseFloat(ledger.cash_balance || 0);
+        let newBankBalance = parseFloat(ledger.bank_balance || 0);
+
+        if (cashType === 'cash') {
+            newCashBalance -= parseFloat(amountToDeduct || 0);
+        } else if (cashType === 'bank') {
+            newBankBalance -= parseFloat(amountToDeduct || 0);
+        } else if (cashType === 'multiple') {
+            newCashBalance -= parseFloat(formData.cash_amount || 0);
+            newBankBalance -= parseFloat(formData.bank_amount || 0);
+        }
+
+        const isNegativeCash = newCashBalance < 0;
+        const isNegativeBank = newBankBalance < 0;
+
+        return (
+            <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
+                <div className="text-xs font-medium mb-1">Projected Balance After Debit:</div>
+                <div className="flex justify-between">
+                    <div className={`flex items-center text-xs ${isNegativeCash ? 'text-red-600' : 'text-green-600'}`}>
+                        <FaMoneyBillWave className="mr-1" />
+                        <span>Cash: ₹{newCashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        {isNegativeCash && <span className="ml-1 text-xs bg-red-100 text-red-800 px-1 rounded">Insufficient</span>}
+                    </div>
+                    <div className={`flex items-center text-xs ${isNegativeBank ? 'text-red-600' : 'text-blue-600'}`}>
+                        <FaUniversity className="mr-1" />
+                        <span>Bank: ₹{newBankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        {isNegativeBank && <span className="ml-1 text-xs bg-red-100 text-red-800 px-1 rounded">Insufficient</span>}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // Add function to generate voucher number
+    const generateVoucherNumber = () => {
+        // This would typically fetch the next serial from the backend
+        // For now, we'll simulate it with a random number as placeholder
+        const serial = Math.floor(Math.random() * 500) + 1;
+        const today = new Date();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const year = String(today.getFullYear()).slice(-2);
+
+        return `CV-${serial}/${month}/${year}`;
+    };
+
+    // Set initial voucher number on component mount
+    useEffect(() => {
+        if (!isEditing && !formData.voucher_number) {
+            setFormData(prev => ({
+                ...prev,
+                voucher_number: generateVoucherNumber()
+            }));
+        }
+    }, []);
+
+    // Handle voucher manual toggle
+    const handleManualVoucherToggle = (e) => {
+        const isManual = e.target.checked;
+        setFormData(prev => ({
+            ...prev,
+            manual_voucher: isManual,
+            // If toggling back to automatic, regenerate the voucher number
+            voucher_number: !isManual ? generateVoucherNumber() : prev.voucher_number
+        }));
+    };
+
     return (
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
-            <div className="mb-6 pb-4 border-b border-gray-100">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center">
-                    <FaMoneyBillWave className="mr-2 text-purple-500" />
-                    {isEditing ? 'Edit Debit Transaction' : 'New Debit Transaction'}
-                </h2>
-                <p className="text-gray-500 mt-1 text-sm">
-                    {isEditing
-                        ? 'Edit the details of an existing debit transaction'
-                        : 'Create a new debit transaction by filling out the form below'
-                    }
-                </p>
+        <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6 max-w-5xl mx-auto">
+            {/* Header with gradient background */}
+            <div className="mb-6 pb-4 relative overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 -mx-6 -mt-6 px-6 py-5 shadow-md">
+                <div className="relative z-10">
+                    <h2 className="text-2xl font-bold text-white flex items-center">
+                        <FaMoneyBillWave className="mr-3 text-white opacity-90" />
+                        {isEditing ? 'Edit Debit Transaction' : 'New Debit Transaction'}
+                    </h2>
+                    <p className="text-indigo-100 mt-1 text-sm">
+                        {isEditing
+                            ? 'Edit the details of an existing debit transaction'
+                            : 'Create a new debit transaction by filling out the form below'
+                        }
+                    </p>
+                </div>
+                <div className="absolute right-0 bottom-0 opacity-10">
+                    <FaMoneyBillWave className="text-white text-9xl transform rotate-12" />
+                </div>
             </div>
 
-            {/* Error message */}
+            {/* Error message with improved styling */}
             {error && (
-                <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg text-red-700 flex items-start">
-                    <FaExclamationTriangle className="text-red-500 mr-3 mt-1 flex-shrink-0" />
+                <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg text-red-700 flex items-start animate-fadeIn">
+                    <FaExclamationTriangle className="text-red-500 mr-3 mt-0.5 flex-shrink-0" />
                     <div>
                         <h3 className="font-bold mb-1">Error</h3>
-                        <p>{error}</p>
+                        <p className="text-sm">{error}</p>
                     </div>
                 </div>
             )}
 
-            {/* Loading state */}
+            {/* Loading state with nicer animation */}
             {loading ? (
-                <div className="flex justify-center items-center h-40">
-                    <div className="text-blue-400">Loading form data...</div>
+                <div className="flex flex-col justify-center items-center h-60 py-12">
+                    <div className="relative">
+                        <div className="h-12 w-12 rounded-full border-t-2 border-b-2 border-indigo-500 animate-spin"></div>
+                        <div className="h-12 w-12 rounded-full border-r-2 border-l-2 border-purple-300 animate-spin absolute top-0 left-0" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+                    </div>
+                    <p className="mt-4 text-indigo-600 font-medium">Loading form data...</p>
                 </div>
             ) : (
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Account selection */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Account *</label>
-                            <select
-                                name="account_id"
-                                value={formData.account_id}
-                                onChange={handleInputChange}
-                                className={`bg-gray-700 text-white border ${errors.account_id ? 'border-red-500' : 'border-gray-600'} rounded-lg p-2.5 w-full`}
-                                disabled={submitting}
-                            >
-                                <option value="">Select Account</option>
-                                {accounts.map(account => (
-                                    <option key={account.id} value={account.id}>
-                                        {account.name}
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.account_id && <p className="text-red-500 text-xs mt-1 error-message">{errors.account_id}</p>}
-                        </div>
-
-                        {/* Ledger Head selection (conditional based on split mode) */}
-                        {!useSplits && (
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Ledger Head *</label>
-                                <select
-                                    name="ledger_head_id"
-                                    value={formData.ledger_head_id}
-                                    onChange={handleInputChange}
-                                    className={`bg-gray-700 text-white border ${errors.ledger_head_id ? 'border-red-500' : 'border-gray-600'} rounded-lg p-2.5 w-full`}
-                                    disabled={submitting || !formData.account_id}
+                <form onSubmit={handleSubmit} className="space-y-8">
+                    {/* Account and Ledger Head Selections with improved styling */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Account Selection */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                                <span className="bg-indigo-100 text-indigo-700 p-1.5 rounded-full mr-2">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                    </svg>
+                                </span>
+                                Account <span className="text-red-500 ml-1">*</span>
+                            </label>
+                            <div className="relative" ref={accountDropdownRef}>
+                                <div
+                                    className="border-2 border-indigo-100 hover:border-indigo-300 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200"
+                                    onClick={() => setIsAccountDropdownOpen(!isAccountDropdownOpen)}
                                 >
-                                    <option value="">Select Ledger Head</option>
-                                    {filteredLedgerHeads.map(head => (
-                                        <option key={head.id} value={head.id}>
-                                            {head.name}
-                                        </option>
-                                    ))}
-                                </select>
-                                {errors.ledger_head_id && <p className="text-red-500 text-xs mt-1 error-message">{errors.ledger_head_id}</p>}
-                            </div>
-                        )}
-
-                        {/* Transaction Amount */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Amount (₹) *</label>
-                            <input
-                                type="number"
-                                name="amount"
-                                value={formData.amount}
-                                onChange={handleInputChange}
-                                className={`bg-gray-700 text-white border ${errors.amount ? 'border-red-500' : 'border-gray-600'} rounded-lg p-2.5 w-full`}
-                                min="0.01"
-                                step="0.01"
-                                disabled={submitting}
-                            />
-                            {errors.amount && <p className="text-red-500 text-xs mt-1 error-message">{errors.amount}</p>}
-                        </div>
-
-                        {/* Cash Type */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Payment Method *</label>
-                            <select
-                                name="cash_type"
-                                value={formData.cash_type}
-                                onChange={handleInputChange}
-                                className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2.5 w-full"
-                                disabled={submitting}
-                            >
-                                <option value="cash">Cash</option>
-                                <option value="bank">Bank Transfer</option>
-                                <option value="upi">UPI</option>
-                                <option value="card">Card Payment</option>
-                                <option value="netbank">Net Banking</option>
-                                <option value="cheque">Cheque</option>
-                            </select>
-                        </div>
-
-                        {/* Transaction Date */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Date *</label>
-                            <input
-                                type="date"
-                                name="tx_date"
-                                value={formData.tx_date}
-                                onChange={handleInputChange}
-                                className={`bg-gray-700 text-white border ${errors.tx_date ? 'border-red-500' : 'border-gray-600'} rounded-lg p-2.5 w-full`}
-                                disabled={submitting}
-                            />
-                            {errors.tx_date && <p className="text-red-500 text-xs mt-1 error-message">{errors.tx_date}</p>}
-                        </div>
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">Description (Optional)</label>
-                        <textarea
-                            name="description"
-                            value={formData.description}
-                            onChange={handleInputChange}
-                            rows="3"
-                            className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2.5 w-full"
-                            disabled={submitting}
-                        ></textarea>
-                    </div>
-
-                    {/* Split Transaction Option */}
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center">
-                            <button
-                                type="button"
-                                onClick={toggleSplitMode}
-                                className={`flex items-center px-4 py-2 rounded-lg mr-3 ${useSplits ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}
-                                disabled={submitting}
-                            >
-                                {useSplits ? <FaTimes className="mr-2" /> : <FaPlus className="mr-2" />}
-                                {useSplits ? 'Disable Split' : 'Enable Split Transaction'}
-                            </button>
-                            <p className="text-sm text-gray-400">
-                                {useSplits
-                                    ? 'Distribute this transaction across multiple ledger heads'
-                                    : 'Split this transaction across multiple ledger heads'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Split Transaction Items */}
-                    {useSplits && (
-                        <div className="bg-gray-700 p-4 rounded-lg">
-                            <h3 className="text-lg font-semibold text-blue-400 mb-4 flex items-center">
-                                <FaMoneyBillWave className="mr-2" />
-                                Split Transaction
-                            </h3>
-
-                            {errors.splits && (
-                                <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300">
-                                    {errors.splits}
+                                    <span className="font-medium text-gray-800">
+                                        {formData.account_id
+                                            ? accounts.find(a => a.id.toString() === formData.account_id)?.name || 'Select Account'
+                                            : 'Select Account'
+                                        }
+                                    </span>
+                                    <svg className={`w-4 h-4 text-indigo-500 transition-transform duration-200 ${isAccountDropdownOpen ? 'transform rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
                                 </div>
-                            )}
-
-                            <div className="space-y-4">
-                                {formData.splits.map((split, index) => (
-                                    <div key={index} className="grid grid-cols-12 gap-4 items-start">
-                                        <div className="col-span-6">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                                Ledger Head *
-                                            </label>
-                                            <select
-                                                value={split.ledger_head_id}
-                                                onChange={(e) => updateSplit(index, 'ledger_head_id', e.target.value)}
-                                                className={`bg-gray-600 text-white border ${errors[`splits[${index}].ledger_head_id`] ? 'border-red-500' : 'border-gray-500'} rounded-lg p-2.5 w-full`}
-                                                disabled={submitting}
-                                            >
-                                                <option value="">Select Ledger Head</option>
-                                                {filteredLedgerHeads.map(head => (
-                                                    <option key={head.id} value={head.id}>
-                                                        {head.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            {errors[`splits[${index}].ledger_head_id`] && (
-                                                <p className="text-red-500 text-xs mt-1 error-message">
-                                                    {errors[`splits[${index}].ledger_head_id`]}
-                                                </p>
-                                            )}
+                                {isAccountDropdownOpen && (
+                                    <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto animate-fadeIn">
+                                        <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <FaSearch className="h-4 w-4 text-gray-400" />
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md bg-gray-50 focus:bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                    placeholder="Search accounts..."
+                                                    value={accountSearchQuery}
+                                                    onChange={(e) => setAccountSearchQuery(e.target.value)}
+                                                />
+                                            </div>
                                         </div>
-
-                                        <div className="col-span-4">
-                                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                                Amount *
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={split.amount}
-                                                onChange={(e) => updateSplit(index, 'amount', e.target.value)}
-                                                className={`bg-gray-600 text-white border ${errors[`splits[${index}].amount`] ? 'border-red-500' : 'border-gray-500'} rounded-lg p-2.5 w-full`}
-                                                min="0.01"
-                                                step="0.01"
-                                                disabled={submitting}
-                                            />
-                                            {errors[`splits[${index}].amount`] && (
-                                                <p className="text-red-500 text-xs mt-1 error-message">
-                                                    {errors[`splits[${index}].amount`]}
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        <div className="col-span-2 flex pt-8">
-                                            {index === 0 && formData.splits.length < 5 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={addSplit}
-                                                    className="h-10 w-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center mr-2"
-                                                    disabled={submitting}
-                                                >
-                                                    <FaPlus />
-                                                </button>
-                                            )}
-
-                                            {formData.splits.length > 1 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeSplit(index)}
-                                                    className="h-10 w-10 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
-                                                    disabled={submitting}
-                                                >
-                                                    <FaTrash />
-                                                </button>
+                                        <div className="py-1">
+                                            {accounts
+                                                .filter(account => account.name.toLowerCase().includes(accountSearchQuery.toLowerCase()))
+                                                .map(account => (
+                                                    <div
+                                                        key={account.id}
+                                                        className={`px-4 py-2.5 cursor-pointer hover:bg-indigo-50 flex items-center ${formData.account_id === account.id.toString() ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-gray-700'}`}
+                                                        onClick={() => handleAccountSelect(account)}
+                                                    >
+                                                        {formData.account_id === account.id.toString() && (
+                                                            <svg className="w-4 h-4 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                        <span className={formData.account_id !== account.id.toString() ? "ml-6" : ""}>{account.name}</span>
+                                                    </div>
+                                                ))
+                                            }
+                                            {accounts.filter(account => account.name.toLowerCase().includes(accountSearchQuery.toLowerCase())).length === 0 && (
+                                                <div className="px-4 py-3 text-sm text-gray-500 text-center">No accounts found</div>
                                             )}
                                         </div>
                                     </div>
-                                ))}
+                                )}
+                            </div>
+                            {errors.account_id && <p className="text-red-500 text-xs mt-2 error-message">{errors.account_id}</p>}
+                        </div>
 
-                                <div className="flex justify-between pt-3 border-t border-gray-600">
-                                    <span className="text-gray-300">Total Split Amount:</span>
-                                    <span className={`font-semibold ${calculateSplitTotal() === parseFloat(formData.amount) ? 'text-green-400' : 'text-red-400'}`}>
-                                        {formatCurrency(calculateSplitTotal())}
+                        {/* Source Ledger Head (Credit) */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                                <span className="bg-green-100 text-green-700 p-1.5 rounded-full mr-2">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                    </svg>
+                                </span>
+                                Credit Head (From) <span className="text-red-500 ml-1">*</span>
+                            </label>
+                            <div className="relative" ref={sourceLedgerDropdownRef}>
+                                <div
+                                    className={`border-2 border-green-100 hover:border-green-300 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${!formData.account_id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    onClick={() => formData.account_id && setIsSourceLedgerDropdownOpen(!isSourceLedgerDropdownOpen)}
+                                >
+                                    <span className="font-medium text-gray-800">
+                                        {formData.source_ledger_head_id
+                                            ? ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || 'Select Credit Head'
+                                            : 'Select Credit Head'
+                                        }
                                     </span>
+                                    <svg className={`w-4 h-4 text-green-500 transition-transform duration-200 ${isSourceLedgerDropdownOpen ? 'transform rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
                                 </div>
+                                {isSourceLedgerDropdownOpen && (
+                                    <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto animate-fadeIn">
+                                        <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <FaSearch className="h-4 w-4 text-gray-400" />
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md bg-gray-50 focus:bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                                    placeholder="Search credit heads..."
+                                                    value={sourceLedgerSearchQuery}
+                                                    onChange={(e) => setSourceLedgerSearchQuery(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="py-1">
+                                            {creditLedgerHeads.map(ledger => (
+                                                <div
+                                                    key={ledger.id}
+                                                    className={`px-4 py-2.5 cursor-pointer hover:bg-green-50 flex items-center ${formData.source_ledger_head_id === ledger.id.toString() ? 'bg-green-100 text-green-700 font-medium' : 'text-gray-700'}`}
+                                                    onClick={() => handleSourceLedgerSelect(ledger)}
+                                                >
+                                                    {formData.source_ledger_head_id === ledger.id.toString() && (
+                                                        <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                    <span className={formData.source_ledger_head_id !== ledger.id.toString() ? "ml-6" : ""}>{ledger.name}</span>
+                                                </div>
+                                            ))}
+                                            {creditLedgerHeads.length === 0 && (
+                                                <div className="px-4 py-3 text-sm text-gray-500 text-center">No credit heads available</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            {errors.source_ledger_head_id && <p className="text-red-500 text-xs mt-2 error-message">{errors.source_ledger_head_id}</p>}
+                        </div>
+
+                        {/* Destination Ledger Head (Debit) */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                                <span className="bg-purple-100 text-purple-700 p-1.5 rounded-full mr-2">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                    </svg>
+                                </span>
+                                Debit Head (To) <span className="text-red-500 ml-1">*</span>
+                            </label>
+                            <div className="relative" ref={debitLedgerDropdownRef}>
+                                <div
+                                    className={`border-2 border-purple-100 hover:border-purple-300 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${!formData.account_id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    onClick={() => formData.account_id && setIsDebitLedgerDropdownOpen(!isDebitLedgerDropdownOpen)}
+                                >
+                                    <span className="font-medium text-gray-800">
+                                        {formData.ledger_head_id
+                                            ? ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || 'Select Debit Head'
+                                            : 'Select Debit Head'
+                                        }
+                                    </span>
+                                    <svg className={`w-4 h-4 text-purple-500 transition-transform duration-200 ${isDebitLedgerDropdownOpen ? 'transform rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </div>
+                                {isDebitLedgerDropdownOpen && (
+                                    <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto animate-fadeIn">
+                                        <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <FaSearch className="h-4 w-4 text-gray-400" />
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md bg-gray-50 focus:bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                    placeholder="Search debit heads..."
+                                                    value={debitLedgerSearchQuery}
+                                                    onChange={(e) => setDebitLedgerSearchQuery(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="py-1">
+                                            {debitLedgerHeads.map(ledger => (
+                                                <div
+                                                    key={ledger.id}
+                                                    className={`px-4 py-2.5 cursor-pointer hover:bg-purple-50 flex items-center ${formData.ledger_head_id === ledger.id.toString() ? 'bg-purple-100 text-purple-700 font-medium' : 'text-gray-700'}`}
+                                                    onClick={() => handleDebitLedgerSelect(ledger)}
+                                                >
+                                                    {formData.ledger_head_id === ledger.id.toString() && (
+                                                        <svg className="w-4 h-4 mr-2 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                    <span className={formData.ledger_head_id !== ledger.id.toString() ? "ml-6" : ""}>{ledger.name}</span>
+                                                </div>
+                                            ))}
+                                            {debitLedgerHeads.length === 0 && (
+                                                <div className="px-4 py-3 text-sm text-gray-500 text-center">No debit heads available</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            {errors.ledger_head_id && <p className="text-red-500 text-xs mt-2 error-message">{errors.ledger_head_id}</p>}
+                        </div>
+                    </div>
+
+                    {/* Display Balance Banner after all selections are complete */}
+                    {formData.source_ledger_head_id && (
+                        <div className="mt-4 mb-4">
+                            <BalanceBanner ledgerId={formData.source_ledger_head_id} />
+                        </div>
+                    )}
+
+                    {/* Payment Method Radio Buttons */}
+                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                        <label htmlFor="cash_type" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                            <span className="bg-purple-100 text-purple-700 p-1.5 rounded-full mr-2">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </span>
+                            Payment Method <span className="text-red-500 ml-1">*</span>
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                            <label
+                                htmlFor="cash_method"
+                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
+                                    ${formData.cash_type === 'cash'
+                                        ? 'border-2 border-green-500 bg-green-50 shadow-md'
+                                        : 'border border-gray-200 hover:border-green-300 hover:bg-green-50/30'}
+                                    ${sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                <input
+                                    id="cash_method"
+                                    type="radio"
+                                    name="cash_type"
+                                    value="cash"
+                                    checked={formData.cash_type === 'cash'}
+                                    onChange={handleInputChange}
+                                    className="sr-only"
+                                    disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0}
+                                />
+                                <span className={`flex items-center ${formData.cash_type === 'cash' ? 'text-green-700' : 'text-gray-700'}`}>
+                                    {formData.cash_type === 'cash' ? (
+                                        <span className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center mr-3 text-white">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </span>
+                                    ) : (
+                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
+                                    )}
+                                    <FaMoneyBillWave className={`mr-2 ${formData.cash_type === 'cash' ? 'text-green-500' : 'text-gray-400'}`} />
+                                    <span className={`font-medium ${formData.cash_type === 'cash' ? 'text-green-700' : 'text-gray-700'}`}>Cash</span>
+                                </span>
+                            </label>
+                            <label
+                                htmlFor="bank_method"
+                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
+                                    ${formData.cash_type === 'bank'
+                                        ? 'border-2 border-blue-500 bg-blue-50 shadow-md'
+                                        : 'border border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'}
+                                    ${sourceLedger && parseFloat(sourceLedger.bank_balance || 0) <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                <input
+                                    id="bank_method"
+                                    type="radio"
+                                    name="cash_type"
+                                    value="bank"
+                                    checked={formData.cash_type === 'bank'}
+                                    onChange={handleInputChange}
+                                    className="sr-only"
+                                    disabled={sourceLedger && parseFloat(sourceLedger.bank_balance || 0) <= 0}
+                                />
+                                <span className={`flex items-center ${formData.cash_type === 'bank' ? 'text-blue-700' : 'text-gray-700'}`}>
+                                    {formData.cash_type === 'bank' ? (
+                                        <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center mr-3 text-white">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </span>
+                                    ) : (
+                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
+                                    )}
+                                    <FaUniversity className={`mr-2 ${formData.cash_type === 'bank' ? 'text-blue-500' : 'text-gray-400'}`} />
+                                    <span className={`font-medium ${formData.cash_type === 'bank' ? 'text-blue-700' : 'text-gray-700'}`}>Bank</span>
+                                </span>
+                            </label>
+                            <label
+                                htmlFor="both_method"
+                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
+                                    ${formData.cash_type === 'multiple'
+                                        ? 'border-2 border-purple-500 bg-purple-50 shadow-md'
+                                        : 'border border-gray-200 hover:border-purple-300 hover:bg-purple-50/30'}
+                                    ${(sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 && parseFloat(sourceLedger.bank_balance || 0) <= 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                <input
+                                    id="both_method"
+                                    type="radio"
+                                    name="cash_type"
+                                    value="multiple"
+                                    checked={formData.cash_type === 'multiple'}
+                                    onChange={handleInputChange}
+                                    className="sr-only"
+                                    disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 && parseFloat(sourceLedger.bank_balance || 0) <= 0}
+                                />
+                                <span className={`flex items-center ${formData.cash_type === 'multiple' ? 'text-purple-700' : 'text-gray-700'}`}>
+                                    {formData.cash_type === 'multiple' ? (
+                                        <span className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center mr-3 text-white">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </span>
+                                    ) : (
+                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
+                                    )}
+                                    <div className="flex items-center">
+                                        <FaMoneyBillWave className={`mr-1 ${formData.cash_type === 'multiple' ? 'text-green-500' : 'text-gray-400'}`} />
+                                        <FaUniversity className={`mr-2 ${formData.cash_type === 'multiple' ? 'text-blue-500' : 'text-gray-400'}`} />
+                                        <span className={`font-medium ${formData.cash_type === 'multiple' ? 'text-purple-700' : 'text-gray-700'}`}>Both</span>
+                                    </div>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    {/* Amount Inputs - Conditional based on cash_type */}
+                    {formData.cash_type === 'multiple' ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                <label htmlFor="cash_amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                    <span className="bg-green-100 text-green-700 p-1.5 rounded-full mr-2">
+                                        <FaMoneyBillWave className="w-3.5 h-3.5" />
+                                    </span>
+                                    Cash Amount <span className="text-red-500 ml-1">*</span>
+                                </label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+                                        <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                            <span className="text-white font-semibold text-sm">₹</span>
+                                        </div>
+                                    </div>
+                                    <input
+                                        id="cash_amount"
+                                        type="number"
+                                        name="cash_amount"
+                                        value={formData.cash_amount || ''}
+                                        onChange={handleInputChange}
+                                        onBlur={(e) => {
+                                            if (e.target.value) {
+                                                const error = validateAmount('cash', e.target.value);
+                                                setErrors(prev => ({ ...prev, cash_amount: error }));
+                                            } else if (formData.bank_amount === '' || parseFloat(formData.bank_amount || 0) <= 0) {
+                                                setErrors(prev => ({ ...prev, cash_amount: 'At least one amount is required' }));
+                                            } else {
+                                                setErrors(prev => ({ ...prev, cash_amount: null }));
+                                            }
+                                        }}
+                                        placeholder="Enter cash amount"
+                                        className={`w-full pl-12 pr-4 py-3 border-2 ${errors.cash_amount ? 'border-red-300 bg-red-50' : 'border-gray-200 focus:border-green-400'} 
+                                        rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-200 shadow-sm transition-all duration-200
+                                        ${sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                        min="0"
+                                        step="0.01"
+                                        disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0}
+                                    />
+                                    {sourceLedger && (
+                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
+                                            Available: <span className="font-medium text-green-600">₹{parseFloat(sourceLedger.cash_balance || 0).toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                {errors.cash_amount && (
+                                    <div className="mt-2 flex items-center text-red-600 text-xs">
+                                        <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        {errors.cash_amount}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                <label htmlFor="bank_amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                    <span className="bg-blue-100 text-blue-700 p-1.5 rounded-full mr-2">
+                                        <FaUniversity className="w-3.5 h-3.5" />
+                                    </span>
+                                    Bank Amount <span className="text-red-500 ml-1">*</span>
+                                </label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+                                        <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                                            <span className="text-white font-semibold text-sm">₹</span>
+                                        </div>
+                                    </div>
+                                    <input
+                                        id="bank_amount"
+                                        type="number"
+                                        name="bank_amount"
+                                        value={formData.bank_amount || ''}
+                                        onChange={handleInputChange}
+                                        onBlur={(e) => {
+                                            if (e.target.value) {
+                                                const error = validateAmount('bank', e.target.value);
+                                                setErrors(prev => ({ ...prev, bank_amount: error }));
+                                            } else if (formData.cash_amount === '' || parseFloat(formData.cash_amount || 0) <= 0) {
+                                                setErrors(prev => ({ ...prev, bank_amount: 'At least one amount is required' }));
+                                            } else {
+                                                setErrors(prev => ({ ...prev, bank_amount: null }));
+                                            }
+                                        }}
+                                        placeholder="Enter bank amount"
+                                        className={`w-full pl-12 pr-4 py-3 border-2 ${errors.bank_amount ? 'border-red-300 bg-red-50' : 'border-gray-200 focus:border-blue-400'} 
+                                        rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-200 shadow-sm transition-all duration-200`}
+                                        min="0"
+                                        step="0.01"
+                                    />
+                                    {sourceLedger && (
+                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
+                                            Available: <span className="font-medium text-blue-600">₹{parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                {errors.bank_amount && (
+                                    <div className="mt-2 flex items-center text-red-600 text-xs">
+                                        <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        {errors.bank_amount}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <label htmlFor="amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                <span className={`${formData.cash_type === 'cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'} p-1.5 rounded-full mr-2`}>
+                                    {formData.cash_type === 'cash' ? (
+                                        <FaMoneyBillWave className="w-3.5 h-3.5" />
+                                    ) : (
+                                        <FaUniversity className="w-3.5 h-3.5" />
+                                    )}
+                                </span>
+                                {formData.cash_type === 'cash' ? 'Cash' : 'Bank'} Amount <span className="text-red-500 ml-1">*</span>
+                            </label>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+                                    <div className={`w-6 h-6 ${formData.cash_type === 'cash' ? 'bg-green-500' : 'bg-blue-500'} rounded-full flex items-center justify-center`}>
+                                        <span className="text-white font-semibold text-sm">₹</span>
+                                    </div>
+                                </div>
+                                <input
+                                    id="amount"
+                                    type="number"
+                                    name="amount"
+                                    value={formData.amount || ''}
+                                    onChange={handleInputChange}
+                                    onBlur={(e) => {
+                                        if (!e.target.value || parseFloat(e.target.value) <= 0) {
+                                            setErrors(prev => ({ ...prev, amount: 'Amount must be greater than zero' }));
+                                        } else {
+                                            const error = validateAmount(formData.cash_type, e.target.value);
+                                            setErrors(prev => ({ ...prev, amount: error }));
+                                        }
+                                    }}
+                                    placeholder={`Enter ${formData.cash_type === 'cash' ? 'cash' : 'bank'} amount`}
+                                    className={`w-full pl-12 pr-4 py-3 border-2 ${errors.amount ? 'border-red-300 bg-red-50' : `border-gray-200 focus:border-${formData.cash_type === 'cash' ? 'green' : 'blue'}-400`} 
+                                    rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-${formData.cash_type === 'cash' ? 'green' : 'blue'}-200 shadow-sm transition-all duration-200`}
+                                    min="0.01"
+                                    step="0.01"
+                                />
+                                {sourceLedger && (
+                                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
+                                        Available: <span className={`font-medium ${formData.cash_type === 'cash' ? 'text-green-600' : 'text-blue-600'}`}>
+                                            ₹{parseFloat(formData.cash_type === 'cash' ? sourceLedger.cash_balance || 0 : sourceLedger.bank_balance || 0).toFixed(2)}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                            {errors.amount && (
+                                <div className="mt-2 flex items-center text-red-600 text-xs">
+                                    <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {errors.amount}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Total Amount Display for Both */}
+                    {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
+                        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-200 shadow-sm animate-fadeIn">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center">
+                                    <span className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center mr-3">
+                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                        </svg>
+                                    </span>
+                                    <span className="text-sm font-semibold text-gray-700">Total Amount:</span>
+                                </div>
+                                <span className="text-xl font-bold text-purple-700">
+                                    ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
+                                </span>
                             </div>
                         </div>
                     )}
 
+                    {/* Voucher, Date and Description - All in one row */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        {/* Voucher Number */}
+                        <div>
+                            <label className="flex justify-between text-sm font-medium text-gray-700 mb-2">
+                                <span>Voucher Number *</span>
+                                <div className="flex items-center">
+                                    <input
+                                        type="checkbox"
+                                        id="manual_voucher"
+                                        name="manual_voucher"
+                                        checked={formData.manual_voucher}
+                                        onChange={handleManualVoucherToggle}
+                                        className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                    />
+                                    <label htmlFor="manual_voucher" className="text-xs text-gray-600">
+                                        Allot Manually
+                                    </label>
+                                </div>
+                            </label>
+                            <div className="relative">
+                                {formData.manual_voucher ? (
+                                    <input
+                                        type="text"
+                                        name="voucher_number"
+                                        id="voucher_number"
+                                        value={formData.voucher_number}
+                                        onChange={handleInputChange}
+                                        placeholder="CV-serial/MM/YY"
+                                        className={`w-full p-2 border ${errors.voucher_number ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                        aria-invalid={!!errors.voucher_number}
+                                        aria-describedby={errors.voucher_number ? "voucher_error" : undefined}
+                                    />
+                                ) : (
+                                    <div className="bg-gray-100 border border-gray-200 rounded-full px-4 py-2 text-center font-medium text-gray-700">
+                                        {formData.voucher_number}
+                                    </div>
+                                )}
+                            </div>
+                            {errors.voucher_number && (
+                                <p id="voucher_error" className="text-red-500 text-xs mt-1 error-message">{errors.voucher_number}</p>
+                            )}
+                        </div>
+
+                        {/* Transaction Date */}
+                        <div>
+                            <label htmlFor="tx_date" className="block text-sm font-medium text-gray-700 mb-2">
+                                <FaCalendarAlt className="inline mr-2 text-gray-500" />
+                                Transaction Date *
+                            </label>
+                            <div className="relative">
+                                <input
+                                    id="tx_date"
+                                    type="date"
+                                    name="tx_date"
+                                    value={formData.tx_date}
+                                    onChange={handleInputChange}
+                                    className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                    aria-invalid={!!errors.tx_date}
+                                    aria-describedby={errors.tx_date ? "date_error" : undefined}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const today = new Date().toISOString().split('T')[0];
+                                        setFormData(prev => ({ ...prev, tx_date: today }));
+                                    }}
+                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
+                                >
+                                    Today
+                                </button>
+                                {/* Display formatted date for better readability */}
+                                {formData.tx_date && (
+                                    <div className="text-xs mt-1 text-gray-500">
+                                        {new Date(formData.tx_date).toLocaleDateString('en-IN', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric'
+                                        }).replace(/\//g, '-')}
+                                    </div>
+                                )}
+                            </div>
+                            {errors.tx_date && (
+                                <p id="date_error" className="text-red-500 text-xs mt-1 error-message" aria-live="polite">{errors.tx_date}</p>
+                            )}
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                                Description (Optional)
+                            </label>
+                            <div className="relative">
+                                <textarea
+                                    id="description"
+                                    name="description"
+                                    value={formData.description}
+                                    onChange={handleInputChange}
+                                    placeholder="Example: Purchase of office supplies"
+                                    className="w-full p-2 border border-gray-300 rounded-md"
+                                    rows="2"
+                                    maxLength="120"
+                                    aria-describedby="desc_counter"
+                                ></textarea>
+                                <div id="desc_counter" className="text-xs text-gray-500 text-right mt-1">
+                                    {formData.description.length}/120 characters
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Form Actions */}
-                    <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-100">
+                    <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-100">
                         <button
                             type="button"
                             onClick={onCancel}
@@ -668,6 +1386,23 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     </div>
                 </form>
             )}
+
+            {/* Additional balance displays and projected balances */}
+            {formData.source_ledger_head_id && formData.amount && formData.cash_type !== 'multiple' && (
+                <ProjectedBalance
+                    ledgerId={formData.source_ledger_head_id}
+                    amountToDeduct={formData.amount}
+                    cashType={formData.cash_type}
+                />
+            )}
+
+            {formData.source_ledger_head_id && formData.cash_type === 'multiple' &&
+                (formData.cash_amount || formData.bank_amount) && (
+                    <ProjectedBalance
+                        ledgerId={formData.source_ledger_head_id}
+                        cashType="multiple"
+                    />
+                )}
         </div>
     );
 } 
