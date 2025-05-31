@@ -8,6 +8,12 @@ module.exports = (sequelize) => {
                 foreignKey: 'account_id',
                 as: 'account'
             });
+
+            // Add association with Transaction
+            LedgerHead.hasMany(models.Transaction, {
+                foreignKey: 'ledger_head_id',
+                as: 'transactions'
+            });
         }
     }
 

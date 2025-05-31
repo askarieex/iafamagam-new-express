@@ -4,5 +4,16 @@
     "@emotion/styled": "^11.14.0",
     "@mui/material": "^7.0.2",
     "react-toastify": "^11.0.5"
-  }
+  },
+  "name": "iafasoftware",
+  "version": "1.0.0",
+  "description": "This is a financial management system with a Node.js/Express backend and Next.js frontend.",
+  "main": "postcss.config.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

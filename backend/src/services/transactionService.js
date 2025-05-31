@@ -210,15 +210,66 @@ class TransactionService {
             }
 
             // Load transaction with its items
-            return await db.Transaction.findByPk(transaction.id, {
+            const loadedTransaction = await db.Transaction.findByPk(transaction.id, {
                 include: [
                     { model: db.TransactionItem, as: 'items' },
-                    { model: db.Donor, as: 'donor' },
-                    { model: db.Booklet, as: 'booklet' },
                     { model: db.LedgerHead, as: 'ledgerHead' }
                 ],
                 transaction: t
             });
+
+            // Create a cheque record if this is a cheque transaction
+            if (data.cash_type === 'cheque') {
+                // Validate required cheque fields
+                if (!data.cheque_number) {
+                    throw new Error('Cheque number is required for cheque transactions');
+                }
+                if (!data.bank_name) {
+                    throw new Error('Bank name is required for cheque transactions');
+                }
+                if (!data.issue_date) {
+                    throw new Error('Issue date is required for cheque transactions');
+                }
+                if (!data.due_date) {
+                    throw new Error('Due date is required for cheque transactions');
+                }
+
+                // Validate sufficient bank balance
+                const chequeService = require('./chequeService');
+
+                // Find all transaction items where this ledger head is a source (negative side)
+                const sourceItems = await db.TransactionItem.findAll({
+                    where: {
+                        transaction_id: transaction.id,
+                        side: '-'
+                    },
+                    transaction: t
+                });
+
+                // Validate each source ledger head has sufficient bank balance
+                for (const item of sourceItems) {
+                    await chequeService.validateSufficientBankBalance(
+                        item.ledger_head_id,
+                        item.amount,
+                        data.id // Pass transaction ID if we're updating an existing transaction
+                    );
+                }
+
+                // Create the cheque record
+                await db.Cheque.create({
+                    tx_id: transaction.id,
+                    account_id: data.account_id,
+                    ledger_head_id: data.ledger_head_id,
+                    cheque_number: data.cheque_number,
+                    bank_name: data.bank_name,
+                    issue_date: data.issue_date,
+                    due_date: data.due_date,
+                    status: 'pending',
+                    description: data.description
+                }, { transaction: t });
+            }
+
+            return loadedTransaction;
         });
     }
 
@@ -247,64 +298,110 @@ class TransactionService {
                 throw new Error('Sum of source amounts does not match total transaction amount');
             }
 
-            // Check if any source would have negative balance after debit
-            for (const source of data.sources) {
-                const ledgerHead = await db.LedgerHead.findByPk(source.ledger_head_id, { transaction: t });
-                if (!ledgerHead) {
-                    throw new Error(`Source ledger head ID ${source.ledger_head_id} not found`);
+            // Special validation for cheque transactions
+            if (data.is_cheque || data.cash_type === 'cheque') {
+                // Validate required cheque fields
+                if (!data.cheque_number) {
+                    throw new Error('Cheque number is required for cheque transactions');
+                }
+                if (!data.bank_name) {
+                    throw new Error('Bank name is required for cheque transactions');
+                }
+                if (!data.issue_date) {
+                    throw new Error('Issue date is required for cheque transactions');
+                }
+                if (!data.due_date) {
+                    throw new Error('Due date is required for cheque transactions');
                 }
 
-                // Check if we're taking from cash or bank
-                let balanceToCheck;
-                let sourceAmount;
+                // Ensure the account/cheque_number combination is unique
+                const existingCheque = await db.Cheque.findOne({
+                    where: {
+                        account_id: data.account_id,
+                        cheque_number: data.cheque_number
+                    },
+                    transaction: t
+                });
 
-                if (data.cash_type === 'multiple') {
-                    // For 'multiple' (both), validate both cash and bank balances separately
-                    const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
-                    const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
-
-                    // Calculate how much of this source will come from cash vs bank
-                    const sourceCashAmount = parseFloat(source.amount) * cashRatio;
-                    const sourceBankAmount = parseFloat(source.amount) * bankRatio;
-
-                    // Check cash balance
-                    if (sourceCashAmount > 0 && parseFloat(ledgerHead.cash_balance) < sourceCashAmount) {
-                        throw new Error(`Insufficient cash balance in ledger head: ${ledgerHead.name}`);
-                    }
-
-                    // Check bank balance
-                    if (sourceBankAmount > 0 && parseFloat(ledgerHead.bank_balance) < sourceBankAmount) {
-                        throw new Error(`Insufficient bank balance in ledger head: ${ledgerHead.name}`);
-                    }
-
-                    // We've already done the checks, so we can continue to the next source
-                    continue;
-                } else if (['cash'].includes(data.cash_type)) {
-                    balanceToCheck = parseFloat(ledgerHead.cash_balance);
-                    sourceAmount = parseFloat(source.amount);
-                } else {
-                    balanceToCheck = parseFloat(ledgerHead.bank_balance);
-                    sourceAmount = parseFloat(source.amount);
+                if (existingCheque) {
+                    throw new Error(`Cheque number ${data.cheque_number} already exists for this account`);
                 }
 
-                if (balanceToCheck < sourceAmount) {
-                    throw new Error(`Insufficient balance in ledger head: ${ledgerHead.name}`);
+                // For cheques, validate available bank balance for each source ledger head
+                const chequeService = require('./chequeService');
+                for (const source of data.sources) {
+                    await chequeService.validateSufficientBankBalance(
+                        source.ledger_head_id,
+                        source.amount,
+                        data.id // Pass transaction ID if we're updating an existing transaction
+                    );
                 }
             }
+            // For non-cheque transactions, check balance as before
+            else if (!data.is_cheque) {
+                // Check if any source would have negative balance after debit
+                for (const source of data.sources) {
+                    const ledgerHead = await db.LedgerHead.findByPk(source.ledger_head_id, { transaction: t });
+                    if (!ledgerHead) {
+                        throw new Error(`Source ledger head ID ${source.ledger_head_id} not found`);
+                    }
+
+                    // Check if we're taking from cash or bank
+                    let balanceToCheck;
+                    let sourceAmount;
+
+                    if (data.cash_type === 'multiple') {
+                        // For 'multiple' (both), validate both cash and bank balances separately
+                        const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
+                        const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
+
+                        // Calculate how much of this source will come from cash vs bank
+                        const sourceCashAmount = parseFloat(source.amount) * cashRatio;
+                        const sourceBankAmount = parseFloat(source.amount) * bankRatio;
+
+                        // Check cash balance
+                        if (sourceCashAmount > 0 && parseFloat(ledgerHead.cash_balance) < sourceCashAmount) {
+                            throw new Error(`Insufficient cash balance in ledger head: ${ledgerHead.name}`);
+                        }
+
+                        // Check bank balance
+                        if (sourceBankAmount > 0 && parseFloat(ledgerHead.bank_balance) < sourceBankAmount) {
+                            throw new Error(`Insufficient bank balance in ledger head: ${ledgerHead.name}`);
+                        }
+
+                        // We've already done the checks, so we can continue to the next source
+                        continue;
+                    } else if (['cash'].includes(data.cash_type)) {
+                        balanceToCheck = parseFloat(ledgerHead.cash_balance);
+                        sourceAmount = parseFloat(source.amount);
+                    } else {
+                        balanceToCheck = parseFloat(ledgerHead.bank_balance);
+                        sourceAmount = parseFloat(source.amount);
+                    }
+
+                    if (balanceToCheck < sourceAmount) {
+                        throw new Error(`Insufficient balance in ledger head: ${ledgerHead.name}`);
+                    }
+                }
+            }
+
+            // Set the actual cash_type to "cheque" if is_cheque is true
+            const actualCashType = data.is_cheque ? 'cheque' : data.cash_type;
 
             // Create the transaction
             const transaction = await db.Transaction.create({
                 account_id: data.account_id,
                 ledger_head_id: data.ledger_head_id,
                 amount: data.amount,
-                cash_amount: data.cash_type === 'cash' ? data.amount :
-                    data.cash_type === 'multiple' ? (data.cash_amount || 0) : 0,
-                bank_amount: data.cash_type === 'bank' ? data.amount :
-                    data.cash_type === 'multiple' ? (data.bank_amount || 0) : 0,
+                cash_amount: actualCashType === 'cash' ? data.amount :
+                    actualCashType === 'multiple' ? (data.cash_amount || 0) : 0,
+                bank_amount: actualCashType === 'bank' || actualCashType === 'cheque' ? data.amount :
+                    actualCashType === 'multiple' ? (data.bank_amount || 0) : 0,
                 tx_type: 'debit',
-                cash_type: data.cash_type,
+                cash_type: actualCashType,
                 tx_date: data.tx_date,
-                description: data.description
+                description: data.description,
+                status: (data.is_cheque || actualCashType === 'cheque') ? 'pending' : 'completed'
             }, { transaction: t });
 
             // Create transaction items for the target
@@ -315,27 +412,6 @@ class TransactionService {
                 side: '+'
             }, { transaction: t });
 
-            // Update the target ledger head balance
-            let cashBalanceTarget, bankBalanceTarget;
-
-            if (data.cash_type === 'multiple') {
-                cashBalanceTarget = parseFloat(data.cash_amount || 0);
-                bankBalanceTarget = parseFloat(data.bank_amount || 0);
-            } else {
-                cashBalanceTarget = ['cash'].includes(data.cash_type) ? parseFloat(data.amount) : 0;
-                bankBalanceTarget = ['cash'].includes(data.cash_type) ? 0 : parseFloat(data.amount);
-            }
-
-            await this.updateLedgerHeadBalance(
-                data.ledger_head_id,
-                data.amount,
-                cashBalanceTarget,
-                bankBalanceTarget,
-                '+',
-                data.tx_date,
-                t
-            );
-
             // Create transaction items for the sources
             for (const source of data.sources) {
                 await db.TransactionItem.create({
@@ -344,38 +420,95 @@ class TransactionService {
                     amount: source.amount,
                     side: '-'
                 }, { transaction: t });
+            }
 
-                // Update the source ledger head balance
-                let cashBalanceSource, bankBalanceSource;
+            // Only update balances if this is NOT a cheque transaction
+            if (!data.is_cheque && actualCashType !== 'cheque') {
+                // Update the target ledger head balance
+                let cashBalanceTarget, bankBalanceTarget;
 
                 if (data.cash_type === 'multiple') {
-                    // Calculate the proper proportion for cash and bank
-                    const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
-                    const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
-
-                    cashBalanceSource = parseFloat(source.amount) * cashRatio;
-                    bankBalanceSource = parseFloat(source.amount) * bankRatio;
+                    cashBalanceTarget = parseFloat(data.cash_amount || 0);
+                    bankBalanceTarget = parseFloat(data.bank_amount || 0);
                 } else {
-                    cashBalanceSource = ['cash'].includes(data.cash_type) ? parseFloat(source.amount) : 0;
-                    bankBalanceSource = ['cash'].includes(data.cash_type) ? 0 : parseFloat(source.amount);
+                    cashBalanceTarget = ['cash'].includes(data.cash_type) ? parseFloat(data.amount) : 0;
+                    bankBalanceTarget = ['cash'].includes(data.cash_type) ? 0 : parseFloat(data.amount);
                 }
 
                 await this.updateLedgerHeadBalance(
-                    source.ledger_head_id,
-                    source.amount,
-                    cashBalanceSource,
-                    bankBalanceSource,
-                    '-',
+                    data.ledger_head_id,
+                    data.amount,
+                    cashBalanceTarget,
+                    bankBalanceTarget,
+                    '+',
                     data.tx_date,
                     t
                 );
+
+                // Update the source ledger head balances
+                for (const source of data.sources) {
+                    let cashBalanceSource, bankBalanceSource;
+
+                    if (data.cash_type === 'multiple') {
+                        // Calculate the proper proportion for cash and bank
+                        const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
+                        const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
+
+                        cashBalanceSource = parseFloat(source.amount) * cashRatio;
+                        bankBalanceSource = parseFloat(source.amount) * bankRatio;
+                    } else {
+                        cashBalanceSource = ['cash'].includes(data.cash_type) ? parseFloat(source.amount) : 0;
+                        bankBalanceSource = ['cash'].includes(data.cash_type) ? 0 : parseFloat(source.amount);
+                    }
+
+                    await this.updateLedgerHeadBalance(
+                        source.ledger_head_id,
+                        source.amount,
+                        cashBalanceSource,
+                        bankBalanceSource,
+                        '-',
+                        data.tx_date,
+                        t
+                    );
+                }
+            }
+
+            // Create a cheque record if is_cheque is true
+            if (data.is_cheque) {
+                // Validate required cheque fields
+                if (!data.cheque_number) {
+                    throw new Error('Cheque number is required for cheque transactions');
+                }
+                if (!data.bank_name) {
+                    throw new Error('Bank name is required for cheque transactions');
+                }
+                if (!data.issue_date) {
+                    throw new Error('Issue date is required for cheque transactions');
+                }
+                if (!data.due_date) {
+                    throw new Error('Due date is required for cheque transactions');
+                }
+
+                // Create the cheque record
+                await db.Cheque.create({
+                    tx_id: transaction.id,
+                    account_id: data.account_id,
+                    ledger_head_id: data.sources[0].ledger_head_id,
+                    cheque_number: data.cheque_number,
+                    bank_name: data.bank_name,
+                    issue_date: data.issue_date,
+                    due_date: data.due_date,
+                    status: 'pending',
+                    description: data.description
+                }, { transaction: t });
             }
 
             // Load transaction with its items
             return await db.Transaction.findByPk(transaction.id, {
                 include: [
                     { model: db.TransactionItem, as: 'items' },
-                    { model: db.LedgerHead, as: 'ledgerHead' }
+                    { model: db.LedgerHead, as: 'ledgerHead' },
+                    { model: db.Cheque, as: 'cheque' }
                 ],
                 transaction: t
             });
@@ -569,7 +702,46 @@ class TransactionService {
         if (filters.ledger_head_id) where.ledger_head_id = filters.ledger_head_id;
         if (filters.donor_id) where.donor_id = filters.donor_id;
         if (filters.tx_type) where.tx_type = filters.tx_type;
-        if (filters.cash_type) where.cash_type = filters.cash_type;
+
+        // Handle status and cash_type together for proper tab filtering
+        if (filters.status) {
+            // For pending tab - ONLY show pending cheques
+            if (filters.status === 'pending') {
+                where.status = 'pending';
+                where.cash_type = 'cheque';
+            }
+            // For cancelled tab - ONLY show cancelled cheques
+            else if (filters.status === 'cancelled') {
+                where.status = 'cancelled';
+                where.cash_type = 'cheque';
+            }
+            // For completed tab - show completed transactions OR cleared cheques
+            else if (filters.status === 'completed') {
+                where[Op.or] = [
+                    // Regular transactions
+                    {
+                        [Op.and]: [
+                            { status: 'completed' },
+                            { cash_type: { [Op.ne]: 'cheque' } }
+                        ]
+                    },
+                    // Cleared cheques
+                    {
+                        [Op.and]: [
+                            { status: 'completed' },
+                            { cash_type: 'cheque' }
+                        ]
+                    }
+                ];
+            } else {
+                where.status = filters.status;
+            }
+        }
+
+        // If separate cash_type filter provided (and not in a status-specific tab)
+        if (filters.cash_type && !filters.status) {
+            where.cash_type = filters.cash_type;
+        }
 
         // Date range filter
         if (filters.start_date && filters.end_date) {
@@ -582,6 +754,8 @@ class TransactionService {
             where.tx_date = { [Op.lte]: filters.end_date };
         }
 
+        console.log('Transaction filter query:', JSON.stringify(where, null, 2));
+
         // Get transactions with count
         const { count, rows } = await db.Transaction.findAndCountAll({
             where,
@@ -590,11 +764,112 @@ class TransactionService {
                 { model: db.Donor, as: 'donor' },
                 { model: db.Booklet, as: 'booklet' },
                 { model: db.LedgerHead, as: 'ledgerHead' },
-                { model: db.Account, as: 'account' }
+                { model: db.Account, as: 'account' },
+                { model: db.Cheque, as: 'cheque' }
             ],
             order: [['tx_date', 'DESC'], ['created_at', 'DESC']],
             limit,
             offset
+        });
+
+        // COUNTS FOR THE TAB HEADERS
+        // These should be consistently calculated regardless of current tab
+
+        // Pending cheques: cash_type=cheque, status=pending
+        const pendingChequesWhere = {
+            cash_type: 'cheque',
+            status: 'pending'
+        };
+
+        // Cancelled cheques: cash_type=cheque, status=cancelled
+        const cancelledChequesWhere = {
+            cash_type: 'cheque',
+            status: 'cancelled'
+        };
+
+        // Apply common filters to these queries too
+        if (filters.account_id) {
+            pendingChequesWhere.account_id = filters.account_id;
+            cancelledChequesWhere.account_id = filters.account_id;
+        }
+
+        if (filters.ledger_head_id) {
+            pendingChequesWhere.ledger_head_id = filters.ledger_head_id;
+            cancelledChequesWhere.ledger_head_id = filters.ledger_head_id;
+        }
+
+        if (filters.tx_type) {
+            pendingChequesWhere.tx_type = filters.tx_type;
+            cancelledChequesWhere.tx_type = filters.tx_type;
+        }
+
+        if (filters.start_date && filters.end_date) {
+            pendingChequesWhere.tx_date = { [Op.between]: [filters.start_date, filters.end_date] };
+            cancelledChequesWhere.tx_date = { [Op.between]: [filters.start_date, filters.end_date] };
+        } else if (filters.start_date) {
+            pendingChequesWhere.tx_date = { [Op.gte]: filters.start_date };
+            cancelledChequesWhere.tx_date = { [Op.gte]: filters.start_date };
+        } else if (filters.end_date) {
+            pendingChequesWhere.tx_date = { [Op.lte]: filters.end_date };
+            cancelledChequesWhere.tx_date = { [Op.lte]: filters.end_date };
+        }
+
+        // Get pending cheques count and sum
+        const pendingCheques = await db.Transaction.findAll({
+            where: pendingChequesWhere,
+            attributes: [
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+                [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
+                ['tx_type', 'type']
+            ],
+            group: ['tx_type'],
+            raw: true
+        });
+
+        // Get cancelled cheques count and sum
+        const cancelledCheques = await db.Transaction.findAll({
+            where: cancelledChequesWhere,
+            attributes: [
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+                [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
+                ['tx_type', 'type']
+            ],
+            group: ['tx_type'],
+            raw: true
+        });
+
+        // Calculate total pending statistics
+        let pendingCount = 0;
+        let pendingTotal = 0;
+        let pendingDebitCount = 0;
+        let pendingCreditCount = 0;
+
+        pendingCheques.forEach(group => {
+            pendingCount += parseInt(group.count) || 0;
+            pendingTotal += parseFloat(group.total) || 0;
+
+            if (group.type === 'debit') {
+                pendingDebitCount += parseInt(group.count) || 0;
+            } else if (group.type === 'credit') {
+                pendingCreditCount += parseInt(group.count) || 0;
+            }
+        });
+
+        // Calculate total cancelled statistics
+        let cancelledCount = 0;
+        let cancelledTotal = 0;
+        let cancelledDebitCount = 0;
+        let cancelledCreditCount = 0;
+
+        cancelledCheques.forEach(group => {
+            cancelledCount += parseInt(group.count) || 0;
+            cancelledTotal += parseFloat(group.total) || 0;
+
+            if (group.type === 'debit') {
+                cancelledDebitCount += parseInt(group.count) || 0;
+            } else if (group.type === 'credit') {
+                cancelledCreditCount += parseInt(group.count) || 0;
+            }
         });
 
         return {
@@ -602,7 +877,15 @@ class TransactionService {
             page,
             limit,
             totalPages: Math.ceil(count / limit),
-            transactions: rows
+            transactions: rows,
+            pendingCount,
+            pendingTotal,
+            cancelledCount,
+            cancelledTotal,
+            pendingDebitCount,
+            pendingCreditCount,
+            cancelledDebitCount,
+            cancelledCreditCount
         };
     }
 
@@ -616,246 +899,9 @@ class TransactionService {
                 { model: db.Donor, as: 'donor' },
                 { model: db.Booklet, as: 'booklet' },
                 { model: db.LedgerHead, as: 'ledgerHead' },
-                { model: db.Account, as: 'account' }
+                { model: db.Account, as: 'account' },
+                { model: db.Cheque, as: 'cheque' }
             ]
-        });
-    }
-
-    /**
-     * Update an existing transaction
-     * @param {number} id - Transaction ID
-     * @param {Object} data - Updated transaction data
-     * @returns {Promise<Object>} Updated transaction
-     */
-    async updateTransaction(id, data) {
-        return await sequelize.transaction(async (t) => {
-            // Find existing transaction with items
-            const existingTransaction = await db.Transaction.findByPk(id, {
-                include: [{ model: db.TransactionItem, as: 'items' }],
-                transaction: t
-            });
-
-            if (!existingTransaction) {
-                throw new Error('Transaction not found');
-            }
-
-            // Handle receipt number changes for credit transactions
-            if (existingTransaction.tx_type === 'credit') {
-                let receiptChange = false;
-                let oldBookletId = existingTransaction.booklet_id;
-                let oldReceiptNo = existingTransaction.receipt_no;
-                let newBookletId = data.booklet_id;
-                let newReceiptNo = data.receipt_no ? parseInt(data.receipt_no) : null;
-
-                // Check if receipt or booklet has changed
-                if (newBookletId !== oldBookletId || (newReceiptNo && newReceiptNo !== oldReceiptNo)) {
-                    receiptChange = true;
-
-                    // If changing to a new booklet or receipt, ensure it's available
-                    if (newBookletId && newReceiptNo) {
-                        // Lock the new booklet for update
-                        const newBooklet = await db.Booklet.findByPk(newBookletId, {
-                            lock: true,
-                            transaction: t
-                        });
-
-                        if (!newBooklet) {
-                            throw new Error('New booklet not found');
-                        }
-
-                        // Check if the receipt exists in the new booklet
-                        if (!newBooklet.pages_left.includes(newReceiptNo)) {
-                            throw new Error(`Receipt number ${newReceiptNo} is not available in this booklet`);
-                        }
-
-                        // Check if this receipt is already used in another transaction
-                        const existingReceiptTransaction = await db.Transaction.findOne({
-                            where: {
-                                booklet_id: newBookletId,
-                                receipt_no: newReceiptNo,
-                                id: { [Op.ne]: id }
-                            },
-                            transaction: t
-                        });
-
-                        if (existingReceiptTransaction) {
-                            throw new Error(`Receipt number ${newReceiptNo} is already used in another transaction`);
-                        }
-
-                        // Remove the new receipt from the new booklet
-                        const newPagesLeft = newBooklet.pages_left.filter(page => page !== newReceiptNo);
-                        await newBooklet.update({
-                            pages_left: newPagesLeft,
-                            is_active: newPagesLeft.length > 0
-                        }, { transaction: t });
-                    }
-
-                    // Return the old receipt to the old booklet
-                    if (oldBookletId && oldReceiptNo) {
-                        const oldBooklet = await db.Booklet.findByPk(oldBookletId, {
-                            transaction: t
-                        });
-
-                        if (oldBooklet) {
-                            // Return the receipt number to the old booklet
-                            const oldPagesLeft = [...oldBooklet.pages_left, oldReceiptNo];
-
-                            // Sort the pages_left array numerically to maintain proper order
-                            oldPagesLeft.sort((a, b) => parseInt(a) - parseInt(b));
-
-                            await oldBooklet.update({
-                                pages_left: oldPagesLeft,
-                                is_active: true
-                            }, { transaction: t });
-                        }
-                    }
-                }
-            }
-
-            // Reverse old transaction effects
-            for (const item of existingTransaction.items) {
-                // Determine if this was a cash or bank transaction
-                let oldCashAmount = 0;
-                let oldBankAmount = 0;
-
-                if (existingTransaction.cash_type === 'cash') {
-                    oldCashAmount = parseFloat(item.amount);
-                } else if (existingTransaction.cash_type === 'bank') {
-                    oldBankAmount = parseFloat(item.amount);
-                } else if (existingTransaction.cash_type === 'both' || existingTransaction.cash_type === 'multiple') {
-                    // For split payment types, use the ratio of cash/bank in the main transaction
-                    const totalAmount = parseFloat(existingTransaction.amount);
-                    const cashRatio = parseFloat(existingTransaction.cash_amount) / totalAmount;
-                    const bankRatio = parseFloat(existingTransaction.bank_amount) / totalAmount;
-
-                    oldCashAmount = parseFloat(item.amount) * cashRatio;
-                    oldBankAmount = parseFloat(item.amount) * bankRatio;
-                }
-
-                // Reverse the effect by flipping the side
-                const reverseSide = item.side === '+' ? '-' : '+';
-
-                // Update the ledger head balance in reverse
-                await this.updateLedgerHeadBalance(
-                    item.ledger_head_id,
-                    item.amount,
-                    oldCashAmount,
-                    oldBankAmount,
-                    reverseSide,
-                    existingTransaction.tx_date,
-                    t
-                );
-            }
-
-            // Delete old transaction items (we'll create new ones)
-            await db.TransactionItem.destroy({
-                where: { transaction_id: id },
-                transaction: t
-            });
-
-            // Prepare payment amounts
-            let cashAmount = 0;
-            let bankAmount = 0;
-
-            if (data.cash_type === 'cash') {
-                cashAmount = parseFloat(data.amount);
-            } else if (data.cash_type === 'bank') {
-                bankAmount = parseFloat(data.amount);
-            } else if (data.cash_type === 'both' || data.cash_type === 'multiple') {
-                cashAmount = parseFloat(data.cash_amount || 0);
-                bankAmount = parseFloat(data.bank_amount || 0);
-            }
-
-            // Update the transaction
-            await existingTransaction.update({
-                account_id: data.account_id,
-                ledger_head_id: data.ledger_head_id,
-                donor_id: data.donor_id || null,
-                booklet_id: data.booklet_id,
-                receipt_no: data.receipt_no,
-                amount: data.amount,
-                cash_amount: cashAmount,
-                bank_amount: bankAmount,
-                cash_type: data.cash_type,
-                tx_date: data.tx_date,
-                description: data.description || ''
-            }, { transaction: t });
-
-            // Create new transaction items
-            if (data.splits && data.splits.length > 0) {
-                // Handle split amounts across different ledger heads
-                let totalSplitAmount = 0;
-                const splitItems = [];
-
-                for (const split of data.splits) {
-                    const splitAmount = parseFloat(split.amount);
-                    totalSplitAmount += splitAmount;
-
-                    splitItems.push({
-                        transaction_id: id,
-                        ledger_head_id: split.ledger_head_id,
-                        amount: splitAmount,
-                        side: '+'
-                    });
-
-                    // Update the ledger head balance for this split
-                    let splitCashAmount = 0;
-                    let splitBankAmount = 0;
-
-                    if (data.cash_type === 'cash') {
-                        splitCashAmount = splitAmount;
-                    } else if (data.cash_type === 'bank') {
-                        splitBankAmount = splitAmount;
-                    } else if (data.cash_type === 'both' || data.cash_type === 'multiple') {
-                        // For split payment types, use the ratio of cash/bank in the total amount
-                        const totalAmount = parseFloat(data.amount);
-                        const cashRatio = parseFloat(data.cash_amount || 0) / totalAmount;
-                        const bankRatio = parseFloat(data.bank_amount || 0) / totalAmount;
-
-                        splitCashAmount = splitAmount * cashRatio;
-                        splitBankAmount = splitAmount * bankRatio;
-                    }
-
-                    await this.updateLedgerHeadBalance(
-                        split.ledger_head_id,
-                        splitAmount,
-                        splitCashAmount,
-                        splitBankAmount,
-                        '+',
-                        data.tx_date,
-                        t
-                    );
-                }
-
-                // Verify total split amount matches transaction amount
-                if (Math.abs(totalSplitAmount - parseFloat(data.amount)) > 0.01) {
-                    throw new Error('Sum of split amounts does not match total transaction amount');
-                }
-
-                await db.TransactionItem.bulkCreate(splitItems, { transaction: t });
-            } else {
-                // Single ledger head
-                await db.TransactionItem.create({
-                    transaction_id: id,
-                    ledger_head_id: data.ledger_head_id,
-                    amount: data.amount,
-                    side: '+'
-                }, { transaction: t });
-
-                // Update the ledger head balance
-                await this.updateLedgerHeadBalance(
-                    data.ledger_head_id,
-                    data.amount,
-                    cashAmount,
-                    bankAmount,
-                    '+',
-                    data.tx_date,
-                    t
-                );
-            }
-
-            // Get the updated transaction with all its associations
-            return await this.getTransactionById(id);
         });
     }
 }

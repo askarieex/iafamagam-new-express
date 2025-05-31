@@ -8,6 +8,7 @@ const monthlyLedgerBalanceRoutes = require('./routes/monthlyLedgerBalanceRoutes'
 const donorRoutes = require('./routes/donorRoutes');
 const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
+const chequeRoutes = require('./routes/chequeRoutes');
 // Import Sequelize models
 const db = require('./models');
 
@@ -28,6 +29,7 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -52,6 +54,7 @@ app.use('/api/monthly-ledger-balances', monthlyLedgerBalanceRoutes);
 app.use('/api/donors', donorRoutes);
 app.use('/api/booklets', bookletRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/cheques', chequeRoutes);
 
 // 404 handler for undefined routes
 app.use((req, res) => {

@@ -7,7 +7,11 @@ import {
     FaUniversity,
     FaExclamationTriangle,
     FaSearch,
-    FaCalendarAlt
+    FaCalendarAlt,
+    FaExchangeAlt,
+    FaMoneyCheck,
+    FaHashtag,
+    FaInfoCircle
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
@@ -25,11 +29,16 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         amount: '',
         cash_amount: '',
         bank_amount: '',
-        cash_type: 'cash',
+        cash_type: 'cash',         // Now can be: cash, bank, multiple, or cheque
         tx_date: new Date().toISOString().split('T')[0], // Current date in YYYY-MM-DD format
         description: '',
         voucher_number: '',
-        manual_voucher: false
+        manual_voucher: false,
+        // is_cheque field removed - now part of cash_type
+        cheque_number: '',
+        bank_name: '',
+        issue_date: '',
+        due_date: ''
     });
 
     // Form validation errors
@@ -120,7 +129,11 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         tx_date: transaction.tx_date || new Date().toISOString().split('T')[0],
                         description: transaction.description || '',
                         voucher_number: transaction.voucher_number || '',
-                        manual_voucher: transaction.manual_voucher || false
+                        manual_voucher: transaction.manual_voucher || false,
+                        cheque_number: transaction.cheque_number || '',
+                        bank_name: transaction.bank_name || '',
+                        issue_date: transaction.issue_date || '',
+                        due_date: transaction.due_date || ''
                     });
                 } else if (accountsRes.data.data.length > 0) {
                     // Default account selection for new transactions
@@ -297,13 +310,40 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 [name]: checked
             }));
         } else if (name === 'cash_type') {
-            if (value === 'multiple') {
+            // Handle payment method change
+            if (value === 'cheque') {
+                // When switching to cheque, set up cheque-specific values
+                const today = new Date().toISOString().split('T')[0];
+                // Set default due date as 5 days from today
+                const dueDate = new Date();
+                dueDate.setDate(dueDate.getDate() + 5);
+                const dueDateStr = dueDate.toISOString().split('T')[0];
+
+                setFormData(prev => ({
+                    ...prev,
+                    [name]: value,
+                    issue_date: prev.issue_date || today,
+                    due_date: prev.due_date || dueDateStr,
+                    // Keep the amount if it exists
+                    amount: prev.amount || '',
+                    // Clear these as they're not used with cheque
+                    cash_amount: '',
+                    bank_amount: ''
+                }));
+            } else if (value === 'multiple') {
                 // If switching to multiple (Both), initialize cash and bank amounts
                 setFormData(prev => ({
                     ...prev,
                     [name]: value,
                     cash_amount: prev.amount || '',
-                    bank_amount: ''
+                    bank_amount: '',
+                    // Clear cheque fields if switching from cheque
+                    ...(prev.cash_type === 'cheque' ? {
+                        cheque_number: '',
+                        bank_name: '',
+                        issue_date: '',
+                        due_date: ''
+                    } : {})
                 }));
                 // Clear any existing amount errors
                 setErrors(prev => ({
@@ -317,7 +357,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 setFormData(prev => ({
                     ...prev,
                     [name]: value,
-                    amount: prev.amount || calculateTotalAmount() || ''
+                    amount: prev.amount || calculateTotalAmount() || '',
+                    // Clear cheque fields if switching from cheque
+                    ...(prev.cash_type === 'cheque' ? {
+                        cheque_number: '',
+                        bank_name: '',
+                        issue_date: '',
+                        due_date: ''
+                    } : {})
                 }));
 
                 // Only validate if the user has already entered an amount
@@ -404,10 +451,29 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             }
         }
 
-        // Check if source ledger has sufficient balance
-        const sourceLedger = ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id);
+        // Cheque-specific fields validation when cheque is selected as payment method
+        if (formData.cash_type === 'cheque') {
+            if (!formData.cheque_number) newErrors.cheque_number = 'Cheque number is required';
+            if (!formData.bank_name) newErrors.bank_name = 'Bank name is required';
+            if (!formData.issue_date) newErrors.issue_date = 'Issue date is required';
+            if (!formData.due_date) newErrors.due_date = 'Due date is required';
 
-        if (sourceLedger) {
+            // Validate that due date is not before issue date
+            if (formData.issue_date && formData.due_date && new Date(formData.due_date) < new Date(formData.issue_date)) {
+                newErrors.due_date = 'Due date cannot be before issue date';
+            }
+
+            // Validate against available bank balance considering pending cheques
+            // This would be done on the backend, but we can add a warning here
+            const sourceLedger = ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id);
+            if (sourceLedger && parseFloat(formData.amount) > parseFloat(sourceLedger.bank_balance || 0)) {
+                newErrors.amount = `Insufficient bank funds. Available: ₹${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}`;
+            }
+        }
+
+        // Check if source ledger has sufficient balance for non-cheque payment methods
+        const sourceLedger = ledgerHeads.find(head => head.id.toString() === formData.source_ledger_head_id);
+        if (sourceLedger && formData.cash_type !== 'cheque') {
             if (formData.cash_type === 'cash') {
                 if (parseFloat(formData.amount) > parseFloat(sourceLedger.cash_balance || 0)) {
                     newErrors.amount = `Insufficient cash balance. Available: ${parseFloat(sourceLedger.cash_balance || 0).toFixed(2)}`;
@@ -474,6 +540,15 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 transactionData.bank_amount = parseFloat(formData.bank_amount || 0);
             }
 
+            // For cheque type, add cheque details and set status to pending
+            if (formData.cash_type === 'cheque') {
+                transactionData.cheque_number = formData.cheque_number;
+                transactionData.bank_name = formData.bank_name;
+                transactionData.issue_date = formData.issue_date;
+                transactionData.due_date = formData.due_date;
+                transactionData.status = 'pending'; // Explicitly set status to pending for cheques
+            }
+
             // Add source ledger head to sources array
             transactionData.sources = [{
                 ledger_head_id: parseInt(formData.source_ledger_head_id),
@@ -498,7 +573,13 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 }
 
                 // Show success message
-                toast.success(isEditing ? 'Transaction updated successfully' : 'Debit transaction created successfully', {
+                const successMessage = formData.cash_type === 'cheque'
+                    ? 'Pending cheque transaction created successfully'
+                    : isEditing
+                        ? 'Transaction updated successfully'
+                        : 'Debit transaction created successfully';
+
+                toast.success(successMessage, {
                     position: "top-right",
                     autoClose: 3000
                 });
@@ -540,8 +621,8 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             return `Exceeds available cash balance (₹${parseFloat(sourceLedger.cash_balance || 0).toFixed(2)})`;
         }
 
-        if (type === 'bank' && parseFloat(value) > parseFloat(sourceLedger.bank_balance || 0)) {
-            return `Exceeds available bank balance (₹${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)})`;
+        if ((type === 'bank' || type === 'cheque') && parseFloat(value) > parseFloat(sourceLedger.bank_balance || 0)) {
+            return `Insufficient bank funds. Available: ₹${parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}`;
         }
 
         return null;
@@ -557,24 +638,27 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         const cashBalance = parseFloat(ledger.cash_balance || 0);
 
         return (
-            <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden">
-                <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg">
+                <div className="px-5 py-4 bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border-b border-gray-200">
                     <h3 className="text-sm font-semibold text-gray-700 flex items-center">
-                        <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        Available Balance: <span className="ml-2 text-indigo-700">{ledger.name}</span>
+                        <div className="bg-indigo-100 p-1.5 rounded-full mr-2">
+                            <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                        </div>
+                        <span className="text-indigo-800">Available Balance:</span>
+                        <span className="ml-2 text-indigo-700 font-bold">{ledger.name}</span>
                     </h3>
                 </div>
                 <div className="grid grid-cols-3 divide-x divide-gray-200">
-                    <div className="p-4 text-center relative overflow-hidden">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-gray-50 to-white">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
                             <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                             </svg>
                             TOTAL BALANCE
                         </div>
-                        <div className="text-2xl font-bold text-gray-800">
+                        <div className="text-2xl font-bold text-gray-800 mt-1">
                             ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className="absolute -right-6 -bottom-6 opacity-5">
@@ -584,14 +668,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </svg>
                         </div>
                     </div>
-                    <div className="p-4 text-center relative overflow-hidden">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-blue-50 to-white">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
                             <svg className="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
                             </svg>
                             CASH IN BANK
                         </div>
-                        <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                        <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'} mt-1`}>
                             ₹{bankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className="absolute -right-6 -bottom-6 opacity-5">
@@ -601,14 +685,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </svg>
                         </div>
                     </div>
-                    <div className="p-4 text-center relative overflow-hidden">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-1 flex items-center justify-center">
+                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-green-50 to-white">
+                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
                             <svg className="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
                             </svg>
                             CASH IN HAND
                         </div>
-                        <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                        <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'} mt-1`}>
                             ₹{cashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className="absolute -right-6 -bottom-6 opacity-5">
@@ -695,15 +779,15 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     };
 
     return (
-        <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6 max-w-5xl mx-auto">
+        <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6 max-w-6xl mx-auto">
             {/* Header with gradient background */}
-            <div className="mb-6 pb-4 relative overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 -mx-6 -mt-6 px-6 py-5 shadow-md">
+            <div className="mb-8 pb-4 relative overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 -mx-6 -mt-6 px-8 py-8 shadow-lg">
                 <div className="relative z-10">
-                    <h2 className="text-2xl font-bold text-white flex items-center">
-                        <FaMoneyBillWave className="mr-3 text-white opacity-90" />
+                    <h2 className="text-3xl font-bold text-white flex items-center">
+                        <FaMoneyBillWave className="mr-4 text-white opacity-90" />
                         {isEditing ? 'Edit Debit Transaction' : 'New Debit Transaction'}
                     </h2>
-                    <p className="text-indigo-100 mt-1 text-sm">
+                    <p className="text-indigo-100 mt-3 text-base max-w-2xl opacity-90">
                         {isEditing
                             ? 'Edit the details of an existing debit transaction'
                             : 'Create a new debit transaction by filling out the form below'
@@ -712,6 +796,28 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 </div>
                 <div className="absolute right-0 bottom-0 opacity-10">
                     <FaMoneyBillWave className="text-white text-9xl transform rotate-12" />
+                </div>
+                <div className="absolute -left-10 -bottom-10 opacity-10">
+                    <svg className="w-32 h-32 text-white opacity-20" fill="currentColor" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="8" />
+                    </svg>
+                </div>
+                <div className="absolute right-20 top-0 opacity-10">
+                    <svg className="w-20 h-20 text-white opacity-20" fill="currentColor" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="8" />
+                    </svg>
+                </div>
+
+                {/* Decorative elements */}
+                <div className="absolute left-1/4 top-1/2 opacity-20">
+                    <svg className="w-16 h-16 text-purple-300" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                    </svg>
+                </div>
+                <div className="absolute right-1/4 bottom-0 opacity-20">
+                    <svg className="w-24 h-24 text-indigo-300" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                    </svg>
                 </div>
             </div>
 
@@ -736,14 +842,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     <p className="mt-4 text-indigo-600 font-medium">Loading form data...</p>
                 </div>
             ) : (
-                <form onSubmit={handleSubmit} className="space-y-8">
+                <form onSubmit={handleSubmit} className="space-y-6">
                     {/* Account and Ledger Head Selections with improved styling */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {/* Account Selection */}
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
-                                <span className="bg-indigo-100 text-indigo-700 p-1.5 rounded-full mr-2">
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center">
+                                <span className="bg-indigo-100 text-indigo-700 p-1 rounded-full mr-2">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                                     </svg>
                                 </span>
@@ -809,10 +915,10 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         </div>
 
                         {/* Source Ledger Head (Credit) */}
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
-                                <span className="bg-green-100 text-green-700 p-1.5 rounded-full mr-2">
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center">
+                                <span className="bg-green-100 text-green-700 p-1 rounded-full mr-2">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                                     </svg>
                                 </span>
@@ -875,10 +981,10 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         </div>
 
                         {/* Destination Ledger Head (Debit) */}
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center">
-                                <span className="bg-purple-100 text-purple-700 p-1.5 rounded-full mr-2">
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center">
+                                <span className="bg-purple-100 text-purple-700 p-1 rounded-full mr-2">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                                     </svg>
                                 </span>
@@ -943,14 +1049,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
                     {/* Display Balance Banner after all selections are complete */}
                     {formData.source_ledger_head_id && (
-                        <div className="mt-4 mb-4">
+                        <div className="mt-3 mb-3">
                             <BalanceBanner ledgerId={formData.source_ledger_head_id} />
                         </div>
                     )}
 
-                    {/* Payment Method Radio Buttons */}
-                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                        <label htmlFor="cash_type" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                    {/* Payment Method Radio Buttons - Redesigned */}
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                        <label htmlFor="cash_type" className="block text-sm font-semibold text-gray-700 mb-4 flex items-center">
                             <span className="bg-purple-100 text-purple-700 p-1.5 rounded-full mr-2">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -958,105 +1064,121 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </span>
                             Payment Method <span className="text-red-500 ml-1">*</span>
                         </label>
-                        <div className="flex flex-wrap gap-3">
-                            <label
-                                htmlFor="cash_method"
-                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
-                                    ${formData.cash_type === 'cash'
-                                        ? 'border-2 border-green-500 bg-green-50 shadow-md'
-                                        : 'border border-gray-200 hover:border-green-300 hover:bg-green-50/30'}
-                                    ${sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
+                        <div className="grid grid-cols-4 gap-4">
+                            <label className="payment-option cursor-pointer">
                                 <input
-                                    id="cash_method"
                                     type="radio"
                                     name="cash_type"
                                     value="cash"
                                     checked={formData.cash_type === 'cash'}
                                     onChange={handleInputChange}
                                     className="sr-only"
-                                    disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0}
                                 />
-                                <span className={`flex items-center ${formData.cash_type === 'cash' ? 'text-green-700' : 'text-gray-700'}`}>
-                                    {formData.cash_type === 'cash' ? (
-                                        <span className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center mr-3 text-white">
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        </span>
-                                    ) : (
-                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
-                                    )}
-                                    <FaMoneyBillWave className={`mr-2 ${formData.cash_type === 'cash' ? 'text-green-500' : 'text-gray-400'}`} />
-                                    <span className={`font-medium ${formData.cash_type === 'cash' ? 'text-green-700' : 'text-gray-700'}`}>Cash</span>
-                                </span>
+                                <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'cash'
+                                    ? 'bg-gradient-to-b from-green-50 to-green-100 border-2 border-green-500 shadow-md transform scale-105'
+                                    : 'bg-white border-2 border-gray-200 hover:border-green-300 hover:bg-green-50'
+                                    }`}>
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${formData.cash_type === 'cash'
+                                        ? 'bg-green-100'
+                                        : 'bg-gray-100'
+                                        }`}>
+                                        <FaMoneyBillWave className={`w-5 h-5 ${formData.cash_type === 'cash'
+                                            ? 'text-green-600'
+                                            : 'text-gray-500'
+                                            }`} />
+                                    </div>
+                                    <span className={`font-medium ${formData.cash_type === 'cash'
+                                        ? 'text-green-700'
+                                        : 'text-gray-700'
+                                        }`}>Cash</span>
+                                </div>
                             </label>
-                            <label
-                                htmlFor="bank_method"
-                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
-                                    ${formData.cash_type === 'bank'
-                                        ? 'border-2 border-blue-500 bg-blue-50 shadow-md'
-                                        : 'border border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'}
-                                    ${sourceLedger && parseFloat(sourceLedger.bank_balance || 0) <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
+
+                            <label className="payment-option cursor-pointer">
                                 <input
-                                    id="bank_method"
                                     type="radio"
                                     name="cash_type"
                                     value="bank"
                                     checked={formData.cash_type === 'bank'}
                                     onChange={handleInputChange}
                                     className="sr-only"
-                                    disabled={sourceLedger && parseFloat(sourceLedger.bank_balance || 0) <= 0}
                                 />
-                                <span className={`flex items-center ${formData.cash_type === 'bank' ? 'text-blue-700' : 'text-gray-700'}`}>
-                                    {formData.cash_type === 'bank' ? (
-                                        <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center mr-3 text-white">
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        </span>
-                                    ) : (
-                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
-                                    )}
-                                    <FaUniversity className={`mr-2 ${formData.cash_type === 'bank' ? 'text-blue-500' : 'text-gray-400'}`} />
-                                    <span className={`font-medium ${formData.cash_type === 'bank' ? 'text-blue-700' : 'text-gray-700'}`}>Bank</span>
-                                </span>
+                                <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'bank'
+                                    ? 'bg-gradient-to-b from-blue-50 to-blue-100 border-2 border-blue-500 shadow-md transform scale-105'
+                                    : 'bg-white border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                                    }`}>
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${formData.cash_type === 'bank'
+                                        ? 'bg-blue-100'
+                                        : 'bg-gray-100'
+                                        }`}>
+                                        <FaUniversity className={`w-5 h-5 ${formData.cash_type === 'bank'
+                                            ? 'text-blue-600'
+                                            : 'text-gray-500'
+                                            }`} />
+                                    </div>
+                                    <span className={`font-medium ${formData.cash_type === 'bank'
+                                        ? 'text-blue-700'
+                                        : 'text-gray-700'
+                                        }`}>Bank</span>
+                                </div>
                             </label>
-                            <label
-                                htmlFor="both_method"
-                                className={`flex items-center py-3 px-4 rounded-lg cursor-pointer transition-all duration-200 bg-white
-                                    ${formData.cash_type === 'multiple'
-                                        ? 'border-2 border-purple-500 bg-purple-50 shadow-md'
-                                        : 'border border-gray-200 hover:border-purple-300 hover:bg-purple-50/30'}
-                                    ${(sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 && parseFloat(sourceLedger.bank_balance || 0) <= 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
+
+                            <label className="payment-option cursor-pointer">
                                 <input
-                                    id="both_method"
                                     type="radio"
                                     name="cash_type"
                                     value="multiple"
                                     checked={formData.cash_type === 'multiple'}
                                     onChange={handleInputChange}
                                     className="sr-only"
-                                    disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 && parseFloat(sourceLedger.bank_balance || 0) <= 0}
                                 />
-                                <span className={`flex items-center ${formData.cash_type === 'multiple' ? 'text-purple-700' : 'text-gray-700'}`}>
-                                    {formData.cash_type === 'multiple' ? (
-                                        <span className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center mr-3 text-white">
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        </span>
-                                    ) : (
-                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 mr-3"></span>
-                                    )}
-                                    <div className="flex items-center">
-                                        <FaMoneyBillWave className={`mr-1 ${formData.cash_type === 'multiple' ? 'text-green-500' : 'text-gray-400'}`} />
-                                        <FaUniversity className={`mr-2 ${formData.cash_type === 'multiple' ? 'text-blue-500' : 'text-gray-400'}`} />
-                                        <span className={`font-medium ${formData.cash_type === 'multiple' ? 'text-purple-700' : 'text-gray-700'}`}>Both</span>
+                                <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'multiple'
+                                    ? 'bg-gradient-to-b from-purple-50 to-purple-100 border-2 border-purple-500 shadow-md transform scale-105'
+                                    : 'bg-white border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                                    }`}>
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${formData.cash_type === 'multiple'
+                                        ? 'bg-purple-100'
+                                        : 'bg-gray-100'
+                                        }`}>
+                                        <FaExchangeAlt className={`w-5 h-5 ${formData.cash_type === 'multiple'
+                                            ? 'text-purple-600'
+                                            : 'text-gray-500'
+                                            }`} />
                                     </div>
-                                </span>
+                                    <span className={`font-medium ${formData.cash_type === 'multiple'
+                                        ? 'text-purple-700'
+                                        : 'text-gray-700'
+                                        }`}>Both</span>
+                                </div>
+                            </label>
+
+                            <label className="payment-option cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="cash_type"
+                                    value="cheque"
+                                    checked={formData.cash_type === 'cheque'}
+                                    onChange={handleInputChange}
+                                    className="sr-only"
+                                />
+                                <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'cheque'
+                                    ? 'bg-gradient-to-b from-amber-50 to-amber-100 border-2 border-amber-500 shadow-md transform scale-105'
+                                    : 'bg-white border-2 border-gray-200 hover:border-amber-300 hover:bg-amber-50'
+                                    }`}>
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${formData.cash_type === 'cheque'
+                                        ? 'bg-amber-100'
+                                        : 'bg-gray-100'
+                                        }`}>
+                                        <FaMoneyCheck className={`w-5 h-5 ${formData.cash_type === 'cheque'
+                                            ? 'text-amber-600'
+                                            : 'text-gray-500'
+                                            }`} />
+                                    </div>
+                                    <span className={`font-medium ${formData.cash_type === 'cheque'
+                                        ? 'text-amber-700'
+                                        : 'text-gray-700'
+                                        }`}>Cheque</span>
+                                </div>
                             </label>
                         </div>
                     </div>
@@ -1064,18 +1186,16 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     {/* Amount Inputs - Conditional based on cash_type */}
                     {formData.cash_type === 'multiple' ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
                                 <label htmlFor="cash_amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                                    <span className="bg-green-100 text-green-700 p-1.5 rounded-full mr-2">
-                                        <FaMoneyBillWave className="w-3.5 h-3.5" />
+                                    <span className="bg-green-100 text-green-700 p-2 rounded-full mr-2 flex items-center justify-center">
+                                        <FaMoneyBillWave className="w-4 h-4" />
                                     </span>
                                     Cash Amount <span className="text-red-500 ml-1">*</span>
                                 </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
-                                        <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                                            <span className="text-white font-semibold text-sm">₹</span>
-                                        </div>
+                                <div className="relative mt-2">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                        <span className="text-gray-500 sm:text-lg font-medium">₹</span>
                                     </div>
                                     <input
                                         id="cash_amount"
@@ -1089,26 +1209,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                                 setErrors(prev => ({ ...prev, cash_amount: error }));
                                             } else if (formData.bank_amount === '' || parseFloat(formData.bank_amount || 0) <= 0) {
                                                 setErrors(prev => ({ ...prev, cash_amount: 'At least one amount is required' }));
-                                            } else {
-                                                setErrors(prev => ({ ...prev, cash_amount: null }));
                                             }
                                         }}
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.cash_amount ? 'border-red-300 bg-red-50' : 'border-green-200 focus:border-green-500 bg-green-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-green-200 transition-all duration-200`}
                                         placeholder="Enter cash amount"
-                                        className={`w-full pl-12 pr-4 py-3 border-2 ${errors.cash_amount ? 'border-red-300 bg-red-50' : 'border-gray-200 focus:border-green-400'} 
-                                        rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-200 shadow-sm transition-all duration-200
-                                        ${sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0 ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                        min="0"
-                                        step="0.01"
-                                        disabled={sourceLedger && parseFloat(sourceLedger.cash_balance || 0) <= 0}
                                     />
-                                    {sourceLedger && (
-                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
-                                            Available: <span className="font-medium text-green-600">₹{parseFloat(sourceLedger.cash_balance || 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
                                 </div>
                                 {errors.cash_amount && (
-                                    <div className="mt-2 flex items-center text-red-600 text-xs">
+                                    <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
                                         <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
@@ -1116,19 +1224,16 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                     </div>
                                 )}
                             </div>
-
-                            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
                                 <label htmlFor="bank_amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                                    <span className="bg-blue-100 text-blue-700 p-1.5 rounded-full mr-2">
-                                        <FaUniversity className="w-3.5 h-3.5" />
+                                    <span className="bg-blue-100 text-blue-700 p-2 rounded-full mr-2 flex items-center justify-center">
+                                        <FaUniversity className="w-4 h-4" />
                                     </span>
                                     Bank Amount <span className="text-red-500 ml-1">*</span>
                                 </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
-                                        <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                                            <span className="text-white font-semibold text-sm">₹</span>
-                                        </div>
+                                <div className="relative mt-2">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                        <span className="text-gray-500 sm:text-lg font-medium">₹</span>
                                     </div>
                                     <input
                                         id="bank_amount"
@@ -1142,24 +1247,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                                 setErrors(prev => ({ ...prev, bank_amount: error }));
                                             } else if (formData.cash_amount === '' || parseFloat(formData.cash_amount || 0) <= 0) {
                                                 setErrors(prev => ({ ...prev, bank_amount: 'At least one amount is required' }));
-                                            } else {
-                                                setErrors(prev => ({ ...prev, bank_amount: null }));
                                             }
                                         }}
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.bank_amount ? 'border-red-300 bg-red-50' : 'border-blue-200 focus:border-blue-500 bg-blue-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all duration-200`}
                                         placeholder="Enter bank amount"
-                                        className={`w-full pl-12 pr-4 py-3 border-2 ${errors.bank_amount ? 'border-red-300 bg-red-50' : 'border-gray-200 focus:border-blue-400'} 
-                                        rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-200 shadow-sm transition-all duration-200`}
-                                        min="0"
-                                        step="0.01"
                                     />
-                                    {sourceLedger && (
-                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
-                                            Available: <span className="font-medium text-blue-600">₹{parseFloat(sourceLedger.bank_balance || 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
                                 </div>
                                 {errors.bank_amount && (
-                                    <div className="mt-2 flex items-center text-red-600 text-xs">
+                                    <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
                                         <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
@@ -1168,23 +1263,181 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 )}
                             </div>
                         </div>
-                    ) : (
-                        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                            <label htmlFor="amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                                <span className={`${formData.cash_type === 'cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'} p-1.5 rounded-full mr-2`}>
-                                    {formData.cash_type === 'cash' ? (
-                                        <FaMoneyBillWave className="w-3.5 h-3.5" />
-                                    ) : (
-                                        <FaUniversity className="w-3.5 h-3.5" />
-                                    )}
-                                </span>
-                                {formData.cash_type === 'cash' ? 'Cash' : 'Bank'} Amount <span className="text-red-500 ml-1">*</span>
-                            </label>
-                            <div className="relative">
-                                <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
-                                    <div className={`w-6 h-6 ${formData.cash_type === 'cash' ? 'bg-green-500' : 'bg-blue-500'} rounded-full flex items-center justify-center`}>
-                                        <span className="text-white font-semibold text-sm">₹</span>
+                    ) : formData.cash_type === 'cheque' ? (
+                        <div className="space-y-6 animate-fadeIn">
+                            {/* Cheque Amount */}
+                            <div className="bg-white p-6 rounded-xl border border-amber-200 shadow-sm hover:shadow-md transition-all duration-200">
+                                <label htmlFor="amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                    <span className="bg-amber-100 text-amber-700 p-2 rounded-full mr-2 flex items-center justify-center">
+                                        <FaMoneyCheck className="w-4 h-4" />
+                                    </span>
+                                    Cheque Amount <span className="text-red-500 ml-1">*</span>
+                                </label>
+                                <div className="relative mt-2">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                        <span className="text-gray-500 sm:text-lg font-medium">₹</span>
                                     </div>
+                                    <input
+                                        id="amount"
+                                        type="number"
+                                        name="amount"
+                                        value={formData.amount || ''}
+                                        onChange={handleInputChange}
+                                        onBlur={(e) => {
+                                            if (!e.target.value || parseFloat(e.target.value) <= 0) {
+                                                setErrors(prev => ({ ...prev, amount: 'Amount must be greater than zero' }));
+                                            } else {
+                                                // For cheques, validate against bank balance
+                                                const error = validateAmount('cheque', e.target.value);
+                                                setErrors(prev => ({ ...prev, amount: error }));
+                                            }
+                                        }}
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.amount ? 'border-red-300 bg-red-50' : 'border-amber-200 focus:border-amber-500 bg-amber-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-amber-200 transition-all duration-200`}
+                                        placeholder="Enter cheque amount"
+                                    />
+                                </div>
+                                {errors.amount && (
+                                    <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
+                                        <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        {errors.amount}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Cheque details section */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                    <label htmlFor="cheque_number" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                        <span className="bg-yellow-100 text-yellow-700 p-1.5 rounded-full mr-2">
+                                            <FaHashtag className="w-3.5 h-3.5" />
+                                        </span>
+                                        Cheque Number <span className="text-red-500 ml-1">*</span>
+                                    </label>
+                                    <input
+                                        id="cheque_number"
+                                        type="text"
+                                        name="cheque_number"
+                                        value={formData.cheque_number || ''}
+                                        onChange={handleInputChange}
+                                        className={`w-full px-4 py-2.5 border rounded-lg ${errors.cheque_number ? 'border-red-500' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                                        placeholder="Enter cheque number"
+                                    />
+                                    {errors.cheque_number && (
+                                        <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
+                                            <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {errors.cheque_number}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                    <label htmlFor="bank_name" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                        <span className="bg-blue-100 text-blue-700 p-1.5 rounded-full mr-2">
+                                            <FaUniversity className="w-3.5 h-3.5" />
+                                        </span>
+                                        Bank Name <span className="text-red-500 ml-1">*</span>
+                                    </label>
+                                    <input
+                                        id="bank_name"
+                                        type="text"
+                                        name="bank_name"
+                                        value={formData.bank_name || ''}
+                                        onChange={handleInputChange}
+                                        className={`w-full px-4 py-2.5 border rounded-lg ${errors.bank_name ? 'border-red-500' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                                        placeholder="Enter bank name"
+                                    />
+                                    {errors.bank_name && (
+                                        <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
+                                            <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {errors.bank_name}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                    <label htmlFor="issue_date" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                        <span className="bg-green-100 text-green-700 p-1.5 rounded-full mr-2">
+                                            <FaCalendarAlt className="w-3.5 h-3.5" />
+                                        </span>
+                                        Issue Date <span className="text-red-500 ml-1">*</span>
+                                    </label>
+                                    <input
+                                        id="issue_date"
+                                        type="date"
+                                        name="issue_date"
+                                        value={formData.issue_date || ''}
+                                        onChange={handleInputChange}
+                                        className={`w-full px-4 py-2.5 border rounded-lg ${errors.issue_date ? 'border-red-500' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                                    />
+                                    {errors.issue_date && (
+                                        <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
+                                            <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {errors.issue_date}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                    <label htmlFor="due_date" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                        <span className="bg-red-100 text-red-700 p-1.5 rounded-full mr-2">
+                                            <FaCalendarAlt className="w-3.5 h-3.5" />
+                                        </span>
+                                        Due Date <span className="text-red-500 ml-1">*</span>
+                                    </label>
+                                    <input
+                                        id="due_date"
+                                        type="date"
+                                        name="due_date"
+                                        value={formData.due_date || ''}
+                                        onChange={handleInputChange}
+                                        className={`w-full px-4 py-2.5 border rounded-lg ${errors.due_date ? 'border-red-500' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                                    />
+                                    {errors.due_date && (
+                                        <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
+                                            <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {errors.due_date}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Note about cheque transactions */}
+                            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md">
+                                <div className="flex">
+                                    <div className="flex-shrink-0">
+                                        <FaInfoCircle className="h-5 w-5 text-yellow-500" />
+                                    </div>
+                                    <div className="ml-3">
+                                        <p className="text-sm text-yellow-700">
+                                            This transaction will be saved as a <strong>pending cheque</strong>. The balance won't be affected until the cheque is cleared.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                            <label htmlFor="amount" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                                <span className={`p-2 rounded-full mr-2 flex items-center justify-center ${formData.cash_type === 'cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                    {formData.cash_type === 'cash' ? <FaMoneyBillWave className="w-4 h-4" /> : <FaUniversity className="w-4 h-4" />}
+                                </span>
+                                Amount <span className="text-red-500 ml-1">*</span>
+                            </label>
+                            <div className="relative mt-2">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <span className="text-gray-500 sm:text-lg font-medium">₹</span>
                                 </div>
                                 <input
                                     id="amount"
@@ -1200,22 +1453,17 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                             setErrors(prev => ({ ...prev, amount: error }));
                                         }
                                     }}
-                                    placeholder={`Enter ${formData.cash_type === 'cash' ? 'cash' : 'bank'} amount`}
-                                    className={`w-full pl-12 pr-4 py-3 border-2 ${errors.amount ? 'border-red-300 bg-red-50' : `border-gray-200 focus:border-${formData.cash_type === 'cash' ? 'green' : 'blue'}-400`} 
-                                    rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-${formData.cash_type === 'cash' ? 'green' : 'blue'}-200 shadow-sm transition-all duration-200`}
-                                    min="0.01"
-                                    step="0.01"
+                                    className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.amount
+                                        ? 'border-red-300 bg-red-50'
+                                        : formData.cash_type === 'cash'
+                                            ? 'border-green-200 focus:border-green-500 bg-green-50 bg-opacity-30 focus:ring-green-200'
+                                            : 'border-blue-200 focus:border-blue-500 bg-blue-50 bg-opacity-30 focus:ring-blue-200'
+                                        } focus:outline-none focus:ring-2 transition-all duration-200`}
+                                    placeholder="Enter amount"
                                 />
-                                {sourceLedger && (
-                                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
-                                        Available: <span className={`font-medium ${formData.cash_type === 'cash' ? 'text-green-600' : 'text-blue-600'}`}>
-                                            ₹{parseFloat(formData.cash_type === 'cash' ? sourceLedger.cash_balance || 0 : sourceLedger.bank_balance || 0).toFixed(2)}
-                                        </span>
-                                    </div>
-                                )}
                             </div>
                             {errors.amount && (
-                                <div className="mt-2 flex items-center text-red-600 text-xs">
+                                <div className="mt-2 flex items-center text-red-600 text-xs animate-fadeIn">
                                     <svg className="w-4 h-4 mr-1 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
@@ -1223,32 +1471,11 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             )}
                         </div>
-                    )}
-
-                    {/* Total Amount Display for Both */}
-                    {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
-                        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-200 shadow-sm animate-fadeIn">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center">
-                                    <span className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center mr-3">
-                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                        </svg>
-                                    </span>
-                                    <span className="text-sm font-semibold text-gray-700">Total Amount:</span>
-                                </div>
-                                <span className="text-xl font-bold text-purple-700">
-                                    ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Voucher, Date and Description - All in one row */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                    )}{/* Voucher, Date and Description - All in one row */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                         {/* Voucher Number */}
                         <div>
-                            <label className="flex justify-between text-sm font-medium text-gray-700 mb-2">
+                            <label className="flex justify-between text-xs font-medium text-gray-700 mb-1">
                                 <span>Voucher Number *</span>
                                 <div className="flex items-center">
                                     <input
@@ -1290,8 +1517,8 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
                         {/* Transaction Date */}
                         <div>
-                            <label htmlFor="tx_date" className="block text-sm font-medium text-gray-700 mb-2">
-                                <FaCalendarAlt className="inline mr-2 text-gray-500" />
+                            <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
+                                <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
                                 Transaction Date *
                             </label>
                             <div className="relative">
@@ -1333,7 +1560,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
                         {/* Description */}
                         <div>
-                            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                            <label htmlFor="description" className="block text-xs font-medium text-gray-700 mb-1">
                                 Description (Optional)
                             </label>
                             <div className="relative">
@@ -1356,34 +1583,49 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     </div>
 
                     {/* Form Actions */}
-                    <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-100">
+                    <div className="flex justify-end space-x-5 mt-10 pt-6 border-t border-gray-100">
                         <button
                             type="button"
                             onClick={onCancel}
-                            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 flex items-center font-medium"
+                            className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 flex items-center font-medium transition-all duration-200 shadow-sm hover:shadow"
                             disabled={submitting}
                         >
-                            <FaTimes className="mr-1.5" />
-                            Cancel
+                            <FaTimes className="mr-2 text-gray-500" />
+                            <span>Cancel</span>
                         </button>
                         <button
                             type="submit"
-                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white flex items-center font-medium"
+                            className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
                             disabled={submitting}
                         >
                             {submitting ? (
-                                <>
-                                    <div className="animate-spin h-4 w-4 mr-2 border-t-2 border-white rounded-full"></div>
-                                    {isEditing ? 'Updating...' : 'Saving...'}
-                                </>
+                                <div className="flex items-center">
+                                    <div className="w-5 h-5 mr-3 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
+                                    <span>{isEditing ? 'Updating...' : 'Saving...'}</span>
+                                </div>
                             ) : (
-                                <>
-                                    <FaSave className="mr-1.5" />
-                                    {isEditing ? 'Update Transaction' : 'Save Transaction'}
-                                </>
+                                <div className="flex items-center">
+                                    <FaSave className="mr-2" />
+                                    <span>{isEditing ? 'Update Transaction' : 'Save Transaction'}</span>
+                                </div>
                             )}
                         </button>
                     </div>
+
+                    {/* Additional note about balance changes */}
+                    {formData.source_ledger_head_id && formData.ledger_head_id && (
+                        <div className="mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">
+                            <div className="flex items-start">
+                                <div className="bg-indigo-100 p-2 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                                    <FaInfoCircle className="text-indigo-500" />
+                                </div>
+                                <div>
+                                    <p className="font-medium mb-1">Balance Changes Summary:</p>
+                                    <p>Funds will be transferred from <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || ''}</span> to <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || ''}</span>.</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </form>
             )}
 
@@ -1403,6 +1645,25 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         cashType="multiple"
                     />
                 )}
+
+            {/* Total Amount Display for Both */}
+            {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
+                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-200 shadow-sm animate-fadeIn hover:shadow-md transition-all duration-200">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                            <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mr-4 shadow-sm">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                            </div>
+                            <span className="text-base font-medium text-gray-700">Total Amount:</span>
+                        </div>
+                        <span className="text-2xl font-bold text-indigo-700">
+                            ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
+                        </span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 } 

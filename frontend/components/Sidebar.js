@@ -15,7 +15,8 @@ import {
     FaFileInvoiceDollar,
     FaHandHoldingUsd,
     FaLayerGroup,
-    FaBook
+    FaBook,
+    FaMoneyCheck
 } from 'react-icons/fa';
 
 const Sidebar = ({ isOpen, toggleSidebar, lightMode = false }) => {
@@ -67,6 +68,7 @@ const Sidebar = ({ isOpen, toggleSidebar, lightMode = false }) => {
                 { name: 'Transactions', path: '/transactions', icon: <FaExchangeAlt /> },
                 { name: 'Donors', path: '/donors', icon: <FaHandHoldingUsd /> },
                 { name: 'Booklets', path: '/booklets', icon: <FaBook /> },
+                { name: 'Cheque Management', path: '/cheque-management', icon: <FaMoneyCheck /> },
             ]
         },
         {

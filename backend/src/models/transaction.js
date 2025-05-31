@@ -28,6 +28,12 @@ module.exports = (sequelize) => {
                 foreignKey: 'transaction_id',
                 as: 'items'
             });
+
+            // Add association with Cheque
+            Transaction.hasOne(models.Cheque, {
+                foreignKey: 'tx_id',
+                as: 'cheque'
+            });
         }
     }
 
@@ -118,6 +124,11 @@ module.exports = (sequelize) => {
         description: {
             type: DataTypes.TEXT,
             allowNull: true
+        },
+        status: {
+            type: DataTypes.ENUM('pending', 'completed', 'cancelled'),
+            defaultValue: 'completed',
+            allowNull: false
         }
     }, {
         sequelize,

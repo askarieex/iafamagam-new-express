@@ -12,7 +12,7 @@ router.post('/debit', transactionController.createDebit);
 router.get('/balances/date', transactionController.getBalancesForDate);
 
 // Get all transactions with pagination and filtering
-router.get('/', transactionController.getAllTransactions);
+router.get('/', transactionController.getTransactions);
 
 // Get transaction by ID
 router.get('/:id', transactionController.getTransactionById);

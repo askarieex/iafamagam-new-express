@@ -75,11 +75,11 @@ class TransactionController {
     }
 
     /**
-     * Get all transactions with pagination and filtering
+     * Get all transactions with optional filtering and pagination
      * @param {Object} req - Express request object
      * @param {Object} res - Express response object
      */
-    async getAllTransactions(req, res) {
+    async getTransactions(req, res) {
         try {
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
@@ -91,15 +91,30 @@ class TransactionController {
                 donor_id: req.query.donor_id,
                 tx_type: req.query.tx_type,
                 cash_type: req.query.cash_type,
+                status: req.query.status,
                 start_date: req.query.start_date,
                 end_date: req.query.end_date
             };
+
+            console.log('Transaction request filters:', filters);
 
             const result = await transactionService.getAllTransactions(page, limit, filters);
 
             return res.status(200).json({
                 success: true,
-                ...result
+                transactions: result.transactions,
+                total: result.total,
+                page,
+                limit,
+                totalPages: result.totalPages,
+                pendingCount: result.pendingCount,
+                pendingTotal: result.pendingTotal,
+                cancelledCount: result.cancelledCount,
+                cancelledTotal: result.cancelledTotal,
+                pendingDebitCount: result.pendingDebitCount,
+                pendingCreditCount: result.pendingCreditCount,
+                cancelledDebitCount: result.cancelledDebitCount,
+                cancelledCreditCount: result.cancelledCreditCount
             });
         } catch (error) {
             console.error('Error getting transactions:', error);
