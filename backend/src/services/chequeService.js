@@ -625,8 +625,22 @@ class ChequeService {
                         continue;
                     }
 
-                    // Generate a cheque number if needed
-                    const chequeNumber = `AUTO-${tx.id.substring(0, 8)}`;
+                    // Format the transaction date for better cheque numbering
+                    const txDate = tx.tx_date ? new Date(tx.tx_date) : new Date();
+                    const dateStr = txDate.toISOString().split('T')[0].replace(/-/g, '');
+
+                    // Generate a better cheque number using transaction date and a portion of the ID
+                    // Format: TXN-YYYYMMDD-{last 4 digits of tx ID}
+                    const txIdSuffix = tx.id.substring(tx.id.length - 4);
+                    const chequeNumber = `TXN-${dateStr}-${txIdSuffix}`;
+
+                    // Create a more meaningful bank name using account information if available
+                    let bankName = 'Unknown Bank';
+                    if (tx.account && tx.account.name) {
+                        bankName = `${tx.account.name} Bank Account`;
+                    } else if (tx.ledgerHead && tx.ledgerHead.name) {
+                        bankName = `${tx.ledgerHead.name} Bank`;
+                    }
 
                     // Create the cheque record
                     try {
@@ -635,11 +649,12 @@ class ChequeService {
                             account_id: tx.account_id,
                             ledger_head_id: ledgerHeadId,
                             cheque_number: chequeNumber,
-                            bank_name: 'Auto-generated',
-                            issue_date: tx.tx_date,
-                            due_date: new Date(new Date(tx.tx_date).getTime() + 30 * 24 * 60 * 60 * 1000), // 30 days after issue
+                            bank_name: bankName,
+                            issue_date: tx.tx_date || new Date(),
+                            // Set due date to 30 days after issue date by default
+                            due_date: new Date(new Date(tx.tx_date || new Date()).getTime() + 30 * 24 * 60 * 60 * 1000),
                             status: 'pending',
-                            description: `Auto-generated for transaction ${tx.id}: ${tx.description || ''}`
+                            description: `Auto-generated for transaction ${tx.voucher_number || tx.id}: ${tx.description || ''}`
                         }, { transaction: t });
 
                         createdCheques.push(cheque);

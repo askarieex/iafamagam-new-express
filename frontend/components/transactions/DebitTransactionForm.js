@@ -328,7 +328,19 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     amount: prev.amount || '',
                     // Clear these as they're not used with cheque
                     cash_amount: '',
-                    bank_amount: ''
+                    bank_amount: '',
+                    // Set focus to cheque fields by ensuring they're not null
+                    cheque_number: prev.cheque_number || '',
+                    bank_name: prev.bank_name || ''
+                }));
+
+                // Clear any validation errors for cheque fields
+                setErrors(prev => ({
+                    ...prev,
+                    cheque_number: null,
+                    bank_name: null,
+                    issue_date: null,
+                    due_date: null
                 }));
             } else if (value === 'multiple') {
                 // If switching to multiple (Both), initialize cash and bank amounts
@@ -394,6 +406,25 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     [name]: error
                 }));
             }
+        } else if (formData.cash_type === 'cheque' && ['cheque_number', 'bank_name'].includes(name)) {
+            // Special handling for cheque fields - validate immediately
+            setFormData(prev => ({
+                ...prev,
+                [name]: value
+            }));
+
+            // Immediate validation for cheque fields
+            if (!value.trim()) {
+                setErrors(prev => ({
+                    ...prev,
+                    [name]: name === 'cheque_number' ? 'Cheque number is required' : 'Bank name is required'
+                }));
+            } else {
+                setErrors(prev => ({
+                    ...prev,
+                    [name]: null
+                }));
+            }
         } else {
             // Standard update for other fields
             setFormData(prev => ({
@@ -453,8 +484,18 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
         // Cheque-specific fields validation when cheque is selected as payment method
         if (formData.cash_type === 'cheque') {
-            if (!formData.cheque_number) newErrors.cheque_number = 'Cheque number is required';
-            if (!formData.bank_name) newErrors.bank_name = 'Bank name is required';
+            if (!formData.cheque_number || !formData.cheque_number.trim()) {
+                newErrors.cheque_number = 'Cheque number is required';
+            } else if (formData.cheque_number.startsWith('AUTO-')) {
+                newErrors.cheque_number = 'Cannot use AUTO- prefix for cheque numbers';
+            }
+
+            if (!formData.bank_name || !formData.bank_name.trim()) {
+                newErrors.bank_name = 'Bank name is required';
+            } else if (formData.bank_name.toLowerCase() === 'auto-generated') {
+                newErrors.bank_name = 'Cannot use "Auto-generated" as bank name';
+            }
+
             if (!formData.issue_date) newErrors.issue_date = 'Issue date is required';
             if (!formData.due_date) newErrors.due_date = 'Due date is required';
 

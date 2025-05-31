@@ -2,8 +2,7 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/accounts": "pages/accounts.js",
+  "/cheque-management": "pages/cheque-management.js",
   "/": "pages/index.js",
-  "/transactions": "pages/transactions.js",
-  "/cheque-management": "pages/cheque-management.js"
+  "/transactions": "pages/transactions.js"
 }

@@ -639,55 +639,225 @@ class TransactionService {
             bank_balance: newBankBalance
         }, { transaction });
 
-        // Update monthly ledger balance
-        const [monthlyBalance, created] = await db.MonthlyLedgerBalance.findOrCreate({
+        // Find and update the associated account
+        await this.updateAccountBalance(ledgerHead.account_id, cashAmount, bankAmount, side, transaction);
+
+        // Check if a monthly balance record exists for this month
+        let monthlyBalance = await db.MonthlyLedgerBalance.findOne({
             where: {
                 account_id: ledgerHead.account_id,
                 ledger_head_id: ledgerHeadId,
                 month,
                 year
             },
-            defaults: {
+            transaction
+        });
+
+        // If no monthly balance exists, we need to create one with proper opening balance
+        if (!monthlyBalance) {
+            // First, determine the opening balance from the previous month
+            let openingBalance = 0;
+
+            // If not January, check previous month of same year
+            let prevMonth, prevYear;
+
+            if (month > 1) {
+                prevMonth = month - 1;
+                prevYear = year;
+            } else {
+                // If January, check December of previous year
+                prevMonth = 12;
+                prevYear = year - 1;
+            }
+
+            // Find previous month's record
+            const prevRecord = await db.MonthlyLedgerBalance.findOne({
+                where: {
+                    account_id: ledgerHead.account_id,
+                    ledger_head_id: ledgerHeadId,
+                    month: prevMonth,
+                    year: prevYear
+                },
+                transaction
+            });
+
+            if (prevRecord) {
+                openingBalance = parseFloat(prevRecord.closing_balance);
+                console.log(`Using previous month's closing balance as opening: ${openingBalance}`);
+            } else {
+                // If no previous month record, calculate from transactions prior to this month
+                const startDate = new Date(year, month - 1, 1);
+                const startDateStr = startDate.toISOString().split('T')[0];
+
+                const priorTransactions = await sequelize.query(`
+                    SELECT SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE -ti.amount END) as balance
+                    FROM transaction_items ti
+                    JOIN transactions t ON ti.transaction_id = t.id
+                    WHERE ti.ledger_head_id = :ledgerHeadId 
+                    AND t.tx_date < :startDate
+                    AND t.status = 'completed'
+                `, {
+                    replacements: {
+                        ledgerHeadId: ledgerHeadId,
+                        startDate: startDateStr
+                    },
+                    type: sequelize.QueryTypes.SELECT,
+                    transaction
+                });
+
+                if (priorTransactions && priorTransactions[0] && priorTransactions[0].balance !== null) {
+                    openingBalance = parseFloat(priorTransactions[0].balance || 0);
+                    console.log(`Calculated opening balance from historical transactions: ${openingBalance}`);
+                }
+            }
+
+            // Create the monthly balance with correct opening balance
+            monthlyBalance = await db.MonthlyLedgerBalance.create({
                 account_id: ledgerHead.account_id,
                 ledger_head_id: ledgerHeadId,
                 month,
                 year,
-                opening_balance: 0,
-                receipts: 0,
-                payments: 0,
-                closing_balance: 0,
-                cash_in_hand: 0,
-                cash_in_bank: 0
-            },
+                opening_balance: openingBalance,
+                receipts: side === '+' ? parseFloat(amount) : 0,
+                payments: side === '-' ? parseFloat(amount) : 0,
+                closing_balance: openingBalance + (side === '+' ? parseFloat(amount) : -parseFloat(amount)),
+                cash_in_hand: side === '+' ? parseFloat(cashAmount) : -parseFloat(cashAmount),
+                cash_in_bank: side === '+' ? parseFloat(bankAmount) : -parseFloat(bankAmount)
+            }, { transaction });
+
+            console.log(`Created new monthly balance for ${month}/${year} with opening ${openingBalance}`);
+        } else {
+            // Update monthly balance receipts/payments and closing
+            let newReceipts = parseFloat(monthlyBalance.receipts);
+            let newPayments = parseFloat(monthlyBalance.payments);
+            let newCashInHand = parseFloat(monthlyBalance.cash_in_hand);
+            let newCashInBank = parseFloat(monthlyBalance.cash_in_bank);
+
+            if (side === '+') {
+                newReceipts += parseFloat(amount);
+                newCashInHand += parseFloat(cashAmount);
+                newCashInBank += parseFloat(bankAmount);
+            } else {
+                newPayments += parseFloat(amount);
+                newCashInHand -= parseFloat(cashAmount);
+                newCashInBank -= parseFloat(bankAmount);
+            }
+
+            const openingBalance = parseFloat(monthlyBalance.opening_balance);
+            const newClosingBalance = openingBalance + newReceipts - newPayments;
+
+            // Update the monthly snapshot
+            await monthlyBalance.update({
+                receipts: newReceipts,
+                payments: newPayments,
+                closing_balance: newClosingBalance,
+                cash_in_hand: newCashInHand,
+                cash_in_bank: newCashInBank
+            }, { transaction });
+
+            console.log(`Updated monthly balance for ${month}/${year}: opening=${openingBalance}, receipts=${newReceipts}, payments=${newPayments}, closing=${newClosingBalance}`);
+        }
+    }
+
+    /**
+     * Update account balance when ledger head balances change
+     * @private
+     */
+    async updateAccountBalance(accountId, cashAmount, bankAmount, side, transaction) {
+        // Find the account with locking for update
+        const account = await db.Account.findByPk(accountId, {
+            lock: true,
             transaction
         });
 
-        // Update monthly balance receipts/payments and closing
-        let newReceipts = parseFloat(monthlyBalance.receipts);
-        let newPayments = parseFloat(monthlyBalance.payments);
-        let newCashInHand = parseFloat(monthlyBalance.cash_in_hand);
-        let newCashInBank = parseFloat(monthlyBalance.cash_in_bank);
-
-        if (side === '+') {
-            newReceipts += parseFloat(amount);
-            newCashInHand += parseFloat(cashAmount);
-            newCashInBank += parseFloat(bankAmount);
-        } else {
-            newPayments += parseFloat(amount);
-            newCashInHand -= parseFloat(cashAmount);
-            newCashInBank -= parseFloat(bankAmount);
+        if (!account) {
+            throw new Error(`Account ID ${accountId} not found`);
         }
 
-        const newClosingBalance = parseFloat(monthlyBalance.opening_balance) + newReceipts - newPayments;
+        // Parse current balances
+        let newCashBalance = parseFloat(account.cash_balance);
+        let newBankBalance = parseFloat(account.bank_balance);
 
-        // Update the monthly snapshot
-        await monthlyBalance.update({
-            receipts: newReceipts,
-            payments: newPayments,
-            closing_balance: newClosingBalance,
-            cash_in_hand: newCashInHand,
-            cash_in_bank: newCashInBank
+        // Update balances based on side (+ or -)
+        if (side === '+') {
+            newCashBalance += parseFloat(cashAmount);
+            newBankBalance += parseFloat(bankAmount);
+        } else {
+            newCashBalance -= parseFloat(cashAmount);
+            newBankBalance -= parseFloat(bankAmount);
+        }
+
+        // Calculate new closing balance (sum of cash and bank)
+        const newClosingBalance = newCashBalance + newBankBalance;
+
+        // Update the account
+        await account.update({
+            cash_balance: newCashBalance,
+            bank_balance: newBankBalance,
+            closing_balance: newClosingBalance
         }, { transaction });
+    }
+
+    /**
+     * Recalculate and synchronize account balances from ledger heads
+     * This can be used to fix discrepancies or during system initialization
+     */
+    async syncAccountBalances() {
+        return await sequelize.transaction(async (t) => {
+            try {
+                // Get all accounts
+                const accounts = await db.Account.findAll({
+                    transaction: t
+                });
+
+                const results = [];
+
+                // For each account, recalculate balances from its ledger heads
+                for (const account of accounts) {
+                    // Get all ledger heads for this account
+                    const ledgerHeads = await db.LedgerHead.findAll({
+                        where: { account_id: account.id },
+                        transaction: t
+                    });
+
+                    // Calculate total cash and bank balances
+                    let totalCashBalance = 0;
+                    let totalBankBalance = 0;
+
+                    for (const ledgerHead of ledgerHeads) {
+                        totalCashBalance += parseFloat(ledgerHead.cash_balance);
+                        totalBankBalance += parseFloat(ledgerHead.bank_balance);
+                    }
+
+                    // Calculate new closing balance
+                    const newClosingBalance = totalCashBalance + totalBankBalance;
+
+                    // Update the account
+                    await account.update({
+                        cash_balance: totalCashBalance,
+                        bank_balance: totalBankBalance,
+                        closing_balance: newClosingBalance
+                    }, { transaction: t });
+
+                    results.push({
+                        accountId: account.id,
+                        name: account.name,
+                        previousClosingBalance: parseFloat(account.closing_balance),
+                        newClosingBalance: newClosingBalance,
+                        changed: parseFloat(account.closing_balance) !== newClosingBalance
+                    });
+                }
+
+                return {
+                    success: true,
+                    message: `Synchronized balances for ${accounts.length} accounts`,
+                    results
+                };
+            } catch (error) {
+                console.error('Error synchronizing account balances:', error);
+                throw error;
+            }
+        });
     }
 
     /**

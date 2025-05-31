@@ -59,26 +59,38 @@ export default function ChequeManagement() {
             setError(null);
 
             // Construct query params from filters
-            let queryParams = '';
+            let queryParams = new URLSearchParams();
             Object.entries(filters).forEach(([key, value]) => {
                 if (value) {
-                    queryParams += `${queryParams ? '&' : '?'}${key}=${value}`;
+                    queryParams.append(key, value);
                 }
             });
 
-            console.log(`Fetching cheques with query: /api/cheques${queryParams}`);
-            const response = await api.get(`/api/cheques${queryParams}`);
+            console.log(`Fetching cheques with query: /api/cheques?${queryParams.toString()}`);
+            const response = await api.get(`/api/cheques?${queryParams.toString()}`);
             console.log('API response:', response.data);
 
-            if (response.data.success && response.data.data) {
-                console.log(`Received ${response.data.data.cheques?.length || 0} cheques`);
-                if (response.data.data.cheques) {
-                    setCheques(response.data.data.cheques);
-                } else if (Array.isArray(response.data.data)) {
+            if (response.data.success) {
+                // Handle various response formats consistently
+                if (Array.isArray(response.data.data)) {
                     setCheques(response.data.data);
+                    console.log(`Received ${response.data.data.length} cheques`);
+                } else if (response.data.data && Array.isArray(response.data.data.cheques)) {
+                    setCheques(response.data.data.cheques);
+                    console.log(`Received ${response.data.data.cheques.length} cheques`);
+                } else if (response.data.data) {
+                    // If data is not an array, try to convert it
+                    const chequeData = response.data.data;
+                    if (typeof chequeData === 'object' && !Array.isArray(chequeData)) {
+                        // If it's a single object, wrap it in an array
+                        setCheques([chequeData]);
+                    } else {
+                        console.error('Unexpected data format:', response.data.data);
+                        setError('Failed to fetch cheques: Data format is not as expected');
+                        setCheques([]);
+                    }
                 } else {
-                    console.error('Unexpected data format:', response.data.data);
-                    setError('Failed to fetch cheques: Data format is not as expected');
+                    // Set empty array if no data
                     setCheques([]);
                 }
 
@@ -87,8 +99,8 @@ export default function ChequeManagement() {
                     setChequeCounts(response.data.counts);
                 }
             } else {
-                console.error('API response not successful or missing data:', response.data);
-                setError('Failed to fetch cheques: Unexpected API response format');
+                console.error('API response not successful:', response.data);
+                setError(`Failed to fetch cheques: ${response.data.message || 'Unknown error'}`);
                 setCheques([]);
             }
         } catch (err) {
@@ -105,10 +117,11 @@ export default function ChequeManagement() {
         try {
             const response = await api.get('/api/accounts');
             if (response.data.success && response.data.data) {
-                setAccounts(response.data.data);
+                setAccounts(Array.isArray(response.data.data) ? response.data.data : []);
             }
         } catch (err) {
             console.error('Error fetching accounts:', err);
+            toast.error('Failed to load account data');
         }
     };
 
@@ -117,10 +130,11 @@ export default function ChequeManagement() {
         try {
             const response = await api.get('/api/ledger-heads');
             if (response.data.success && response.data.data) {
-                setLedgerHeads(response.data.data);
+                setLedgerHeads(Array.isArray(response.data.data) ? response.data.data : []);
             }
         } catch (err) {
             console.error('Error fetching ledger heads:', err);
+            toast.error('Failed to load ledger head data');
         }
     };
 
@@ -147,6 +161,8 @@ export default function ChequeManagement() {
             from_date: '',
             to_date: ''
         });
+        // Fetch data with reset filters
+        setTimeout(() => fetchCheques(), 0);
     };
 
     // Fix missing cheque records
@@ -162,10 +178,10 @@ export default function ChequeManagement() {
             const response = await api.post('/api/cheques/fix-missing');
 
             if (response.data.success) {
-                toast.success(`${response.data.message}`);
+                toast.success(`${response.data.message || 'Missing cheque records fixed successfully'}`);
                 fetchCheques(); // Refresh the list
             } else {
-                toast.error('Failed to fix missing cheque records');
+                toast.error(`Failed to fix missing cheque records: ${response.data.message || 'Unknown error'}`);
             }
         } catch (err) {
             console.error('Error fixing missing cheque records:', err);
@@ -192,7 +208,7 @@ export default function ChequeManagement() {
                 toast.success('Cheque cleared successfully');
                 fetchCheques(); // Refresh the list
             } else {
-                toast.error(`Failed to clear cheque: ${response.data.message}`);
+                toast.error(`Failed to clear cheque: ${response.data.message || 'Unknown error'}`);
             }
         } catch (err) {
             console.error('Error clearing cheque:', err);
@@ -215,7 +231,7 @@ export default function ChequeManagement() {
                 toast.success('Cheque cancelled successfully');
                 fetchCheques(); // Refresh the list
             } else {
-                toast.error(`Failed to cancel cheque: ${response.data.message}`);
+                toast.error(`Failed to cancel cheque: ${response.data.message || 'Unknown error'}`);
             }
         } catch (err) {
             console.error('Error cancelling cheque:', err);
@@ -227,7 +243,7 @@ export default function ChequeManagement() {
 
     // Format currency
     const formatCurrency = (amount) => {
-        return parseFloat(amount).toLocaleString('en-IN', {
+        return parseFloat(amount || 0).toLocaleString('en-IN', {
             maximumFractionDigits: 2,
             style: 'currency',
             currency: 'INR'
@@ -236,12 +252,18 @@ export default function ChequeManagement() {
 
     // Format date
     const formatDate = (dateString) => {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-IN', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
+        if (!dateString) return 'N/A';
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-IN', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+        } catch (err) {
+            console.error('Error formatting date:', err);
+            return dateString;
+        }
     };
 
     // Render status badge
@@ -489,19 +511,19 @@ export default function ChequeManagement() {
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {cheques.map((cheque, index) => (
-                                            <tr key={cheque.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                            <tr key={cheque.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    {cheque.cheque_number}
+                                                    {cheque.cheque_number || 'No Number'}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {cheque.bank_name}
+                                                    {cheque.bank_name || 'Not Specified'}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     <div className="font-medium">{cheque.account?.name || 'Unknown Account'}</div>
-                                                    <div className="text-xs text-gray-400">{cheque.ledgerHead?.name || 'Unknown Ledger'}</div>
+                                                    <div className="text-xs text-gray-400">{cheque.ledgerHead?.name || cheque.ledger_head?.name || 'Unknown Ledger'}</div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {formatCurrency(cheque.transaction?.amount || 0)}
+                                                    {formatCurrency(cheque.amount || cheque.transaction?.amount || 0)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     {formatDate(cheque.issue_date)}
@@ -510,7 +532,7 @@ export default function ChequeManagement() {
                                                     {formatDate(cheque.due_date)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {renderStatusBadge(cheque.status)}
+                                                    {renderStatusBadge(cheque.status || 'unknown')}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                     {cheque.status === 'pending' && (
@@ -519,6 +541,7 @@ export default function ChequeManagement() {
                                                                 onClick={() => handleClearCheque(cheque.id)}
                                                                 className="text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100 p-1.5 rounded-md transition-colors"
                                                                 title="Mark as Cleared"
+                                                                disabled={!cheque.id}
                                                             >
                                                                 <FaCheck className="h-4 w-4" />
                                                             </button>
@@ -526,6 +549,7 @@ export default function ChequeManagement() {
                                                                 onClick={() => handleCancelCheque(cheque.id)}
                                                                 className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-1.5 rounded-md transition-colors"
                                                                 title="Cancel Cheque"
+                                                                disabled={!cheque.id}
                                                             >
                                                                 <FaTimes className="h-4 w-4" />
                                                             </button>
@@ -534,7 +558,8 @@ export default function ChequeManagement() {
                                                     {cheque.status !== 'pending' && (
                                                         <span className="text-gray-400">
                                                             {cheque.status === 'cleared' && cheque.clearing_date && `Cleared on ${formatDate(cheque.clearing_date)}`}
-                                                            {cheque.status === 'cancelled' && 'Cancelled'}
+                                                            {cheque.status === 'cancelled' && (cheque.cancel_reason ? `Cancelled: ${cheque.cancel_reason}` : 'Cancelled')}
+                                                            {!['cleared', 'cancelled'].includes(cheque.status) && 'No actions available'}
                                                         </span>
                                                     )}
                                                 </td>
