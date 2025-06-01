@@ -267,12 +267,8 @@ export default function ChequesList({ onViewCheque }) {
                 </div>
             )}
 
-            {/* Header section */}
+            {/* Controls section */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-y-4">
-                <h1 className="text-xl font-bold text-gray-800 flex items-center">
-                    <FaMoneyCheck className="mr-2 text-indigo-500" />
-                    Cheque Management
-                </h1>
                 <div className="flex items-center gap-2">
                     <span className="px-3 py-1.5 bg-indigo-100 text-indigo-800 rounded-lg text-sm font-medium shadow-sm">
                         {cheques.length} Cheques
@@ -284,15 +280,15 @@ export default function ChequesList({ onViewCheque }) {
                         <FaFilter className="mr-1.5" />
                         Filters
                     </button>
-                    <button
-                        className="px-4 py-2 bg-white hover:bg-gray-50 rounded-lg text-gray-700 flex items-center border border-gray-200 font-medium shadow-sm transition duration-150"
-                        onClick={fetchCheques}
-                        disabled={loading}
-                    >
-                        <FaSync className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </button>
                 </div>
+                <button
+                    className="px-4 py-2 bg-white hover:bg-gray-50 rounded-lg text-gray-700 flex items-center border border-gray-200 font-medium shadow-sm transition duration-150"
+                    onClick={fetchCheques}
+                    disabled={loading}
+                >
+                    <FaSync className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+                    Refresh
+                </button>
             </div>
 
             {/* Filters form */}
@@ -562,8 +558,8 @@ export default function ChequesList({ onViewCheque }) {
                                 <button
                                     type="button"
                                     className={`px-4 py-2 text-white rounded-md focus:outline-none ${confirmActionType === 'clear'
-                                            ? 'bg-green-600 hover:bg-green-700'
-                                            : 'bg-red-600 hover:bg-red-700'
+                                        ? 'bg-green-600 hover:bg-green-700'
+                                        : 'bg-red-600 hover:bg-red-700'
                                         }`}
                                     onClick={() => {
                                         if (confirmActionType === 'clear') {

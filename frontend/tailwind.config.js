@@ -100,8 +100,8 @@ module.exports = {
                         dark: '#334155',
                     }
                 },
-                hand: '#4ade80',
-                bank: '#38bdf8',
+                hand: '#22c55e',
+                bank: '#06b6d4',
                 border: {
                     light: 'rgba(0, 0, 0, 0.05)',
                     dark: 'rgba(255, 255, 255, 0.07)',

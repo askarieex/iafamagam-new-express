@@ -23,7 +23,8 @@ import {
     FaTimesCircle,
     FaExclamationTriangle,
     FaMoneyCheck,
-    FaInfoCircle
+    FaInfoCircle,
+    FaExchangeAlt
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
@@ -525,119 +526,70 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
 
     // Render transaction row with status-based styling
     const renderTransactionRow = (transaction) => {
-        const isPending = transaction.status === 'pending' || (transaction.cheque && transaction.cheque.status === 'pending');
-        const isCancelled = transaction.status === 'cancelled' || (transaction.cheque && transaction.cheque.status === 'cancelled');
-
-        let rowClass = 'hover:bg-gray-50';
-        if (isPending) {
-            rowClass = 'bg-amber-50 hover:bg-amber-100';
-        } else if (isCancelled) {
-            rowClass = 'bg-gray-50 hover:bg-gray-100 text-gray-500';
-        }
-
-        // Style amount text based on status
         const getAmountStyle = () => {
-            if (transaction.cash_type === 'cheque' || transaction.cheque) {
-                if (transaction.status === 'pending' || (transaction.cheque && transaction.cheque.status === 'pending')) {
-                    return 'text-amber-600 font-medium'; // Amber for pending cheques
-                } else if (transaction.status === 'cancelled' || (transaction.cheque && transaction.cheque.status === 'cancelled')) {
-                    return 'text-gray-400 line-through'; // Strike-through for cancelled cheques
-                } else if (transaction.cash_type === 'cheque' && (!transaction.cheque || transaction.cheque.status === 'cleared')) {
-                    return transaction.tx_type === 'credit' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'; // Normal colors for cleared cheques
-                }
+            if (transaction.tx_type === 'debit') {
+                return 'text-red-600 dark:text-red-400';
+            } else {
+                return 'text-green-600 dark:text-green-400';
             }
-            return transaction.tx_type === 'credit' ? 'text-green-600 font-medium' : 'text-red-600 font-medium';
         };
 
         return (
-            <tr key={transaction.id} className={`${rowClass} transition duration-150`}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
-                    {formatDate(transaction.tx_date)}
+            <tr key={transaction.id} className="hover:bg-gray-50 dark:hover:bg-secondary-800/50 border-b border-gray-100 dark:border-secondary-800 transition-colors">
+                <td className="px-3 py-2.5 text-xs">
+                    <span className="font-medium text-secondary-800 dark:text-secondary-200">
+                        {formatDate(transaction.createdAt)}
+                    </span>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                    {renderTransactionType(transaction.tx_type)}
-                </td>
-                <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-700">{transaction.account?.name || 'Unknown Account'}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                        {transaction.ledgerHead?.name || 'Multiple Ledger Heads'}
+                <td className="px-3 py-2.5">
+                    <div className="flex items-center">
+                        {transaction.tx_type === 'debit' ? (
+                            <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center">
+                                <FaArrowUp className="mr-1 text-[8px]" />
+                                Debit
+                            </div>
+                        ) : (
+                            <div className="bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center">
+                                <FaArrowDown className="mr-1 text-[8px]" />
+                                Credit
+                            </div>
+                        )}
                     </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                    {transaction.booklet && transaction.receipt_no ? (
-                        <div className="flex items-center">
-                            <span className="px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-md text-xs font-medium border border-blue-200 shadow-sm">
-                                {transaction.booklet.prefix}{transaction.receipt_no.toString().padStart(transaction.booklet.digit_length, '0')}
-                            </span>
-                        </div>
-                    ) : (
-                        <span className="text-gray-400">—</span>
-                    )}
+                <td className="px-3 py-2.5">
+                    <div className="text-xs">
+                        <div className="font-medium text-secondary-800 dark:text-secondary-200">{transaction.account?.name || 'Unknown'}</div>
+                        <div className="text-secondary-500 dark:text-secondary-400 text-[10px] mt-0.5">{transaction.ledgerHead?.name || 'Unknown'}</div>
+                    </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <span className={`${getAmountStyle()}`}>
+                <td className="px-3 py-2.5 text-xs">
+                    <div className="flex items-center">
+                        {renderCashTypeWithStatus(transaction)}
+                    </div>
+                </td>
+                <td className="px-3 py-2.5">
+                    <div className={`text-xs font-medium ${getAmountStyle()}`}>
                         {formatCurrency(transaction.amount)}
-                    </span>
-                    {isPending && transaction.cheque && (
-                        <div className="text-xs text-amber-700 mt-1">
-                            Not deducted yet
-                        </div>
-                    )}
-                    {isCancelled && transaction.cheque && (
-                        <div className="text-xs text-gray-500 mt-1">
-                            Cancelled - no deduction
-                        </div>
-                    )}
+                    </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                    {transaction.cheque ? (
-                        <div className="text-sm">{transaction.cheque.cheque_number}</div>
-                    ) : (
-                        <span className="text-gray-400">—</span>
-                    )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                    {transaction.cheque ? (
-                        <div className="text-sm">{formatDate(transaction.cheque.due_date)}</div>
-                    ) : (
-                        <span className="text-gray-400">—</span>
-                    )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                    {renderCashTypeWithStatus(transaction)}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end space-x-2">
+                <td className="px-3 py-2.5 text-right">
+                    <div className="flex items-center justify-end space-x-1">
                         <button
-                            onClick={() => onViewTransaction(transaction)}
-                            className="text-blue-600 hover:text-blue-900"
-                            title="View Details"
+                            onClick={() => handleViewTransaction(transaction)}
+                            className="p-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-md text-blue-600 dark:text-blue-400 transition-colors"
+                            title="View transaction details"
                         >
-                            <FaEye />
+                            <FaEye className="w-3 h-3" />
                         </button>
-                        {/* Only show edit for credit transactions that are not cheques or cancelled cheques */}
-                        {transaction.tx_type === 'credit' &&
-                            (!transaction.cheque ||
-                                (transaction.cheque && transaction.cheque.status === 'cancelled')) && (
-                                <button
-                                    onClick={() => onEditTransaction(transaction)}
-                                    className="text-indigo-600 hover:text-indigo-900"
-                                    title="Edit Transaction"
-                                >
-                                    <FaEdit />
-                                </button>
-                            )}
-                        {/* Only show delete for non-cheque transactions or cancelled cheques */}
-                        {(!transaction.cheque ||
-                            (transaction.cheque && transaction.cheque.status === 'cancelled')) && (
-                                <button
-                                    onClick={() => setConfirmDeleteId(transaction.id)}
-                                    className="text-red-600 hover:text-red-900"
-                                    title="Delete Transaction"
-                                >
-                                    <FaTrash />
-                                </button>
-                            )}
+                        {transaction.status !== 'pending' && transaction.status !== 'cancelled' && (
+                            <button
+                                onClick={() => handleEditTransaction(transaction)}
+                                className="p-1.5 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-md text-green-600 dark:text-green-400 transition-colors"
+                                title="Edit transaction"
+                            >
+                                <FaEdit className="w-3 h-3" />
+                            </button>
+                        )}
                     </div>
                 </td>
             </tr>
@@ -696,462 +648,279 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
         return tab?.description || '';
     };
 
-    return (
-        <div className="space-y-6">
-            {/* Error message */}
-            {error && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start shadow-sm">
-                    <div className="flex-1">
-                        <h3 className="font-bold mb-1 flex items-center">
-                            <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Error
-                        </h3>
-                        <p className="text-sm">{error}</p>
+    // Update the tab rendering section to be more beautiful and responsive with smaller font
+    const renderTabs = () => {
+        return (
+            <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden mb-4">
+                <div className="flex items-center px-4 py-3 border-b border-gray-100 dark:border-secondary-700">
+                    <div className="flex items-center text-secondary-700 dark:text-secondary-300 text-sm">
+                        <FaListAlt className="mr-2 text-primary-500 dark:text-primary-400" />
+                        <span className="font-medium">Transactions List</span>
                     </div>
-                    <button
-                        onClick={fetchTransactions}
-                        className="px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded-lg text-red-700 text-sm font-medium flex items-center shadow-sm transition duration-150"
-                    >
-                        <FaSync className="mr-1.5" />
-                        Retry
-                    </button>
+                    <div className="ml-auto flex items-center space-x-2 text-xs">
+                        <div className="bg-gray-100 dark:bg-secondary-700 rounded-lg px-3 py-1 text-secondary-700 dark:text-secondary-300 font-medium">
+                            {totalTransactions} Transactions
+                        </div>
+                        <button
+                            onClick={() => setShowFilters(!showFilters)}
+                            className="flex items-center px-3 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-secondary-700 dark:hover:bg-secondary-600 rounded-lg text-secondary-700 dark:text-secondary-300 transition-colors"
+                        >
+                            <FaFilter className="mr-1.5" />
+                            <span>Filters</span>
+                        </button>
+                        <button
+                            onClick={() => fetchTransactions()}
+                            className="flex items-center px-3 py-1 bg-primary-50 hover:bg-primary-100 dark:bg-primary-900/20 dark:hover:bg-primary-900/30 rounded-lg text-primary-600 dark:text-primary-400 transition-colors"
+                        >
+                            <FaSync className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+                            <span>Refresh</span>
+                        </button>
+                    </div>
                 </div>
-            )}
 
-            {/* Header section */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-y-4">
-                <h1 className="text-xl font-bold text-gray-800 flex items-center">
-                    <FaListAlt className="mr-2 text-indigo-500" />
-                    Transactions List
-                </h1>
-                <div className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 bg-indigo-100 text-indigo-800 rounded-lg text-sm font-medium shadow-sm">
-                        {totalTransactions} Transactions
-                    </span>
-                    <button
-                        className={`px-4 py-2 rounded-lg text-white flex items-center font-medium transition duration-150 ${showFilters ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-500 hover:bg-gray-600'} shadow-sm`}
-                        onClick={() => setShowFilters(!showFilters)}
-                    >
-                        <FaFilter className="mr-1.5" />
-                        Filters
-                    </button>
-                    <button
-                        className="px-4 py-2 bg-white hover:bg-gray-50 rounded-lg text-gray-700 flex items-center border border-gray-200 font-medium shadow-sm transition duration-150"
-                        onClick={fetchTransactions}
-                        disabled={loading}
-                    >
-                        <FaSync className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </button>
-                </div>
-            </div>
+                <div className="flex flex-col">
+                    <div className="flex flex-wrap border-b border-gray-100 dark:border-secondary-700">
+                        {tabs.map((tab) => {
+                            // Determine if this is the active tab
+                            const isActive = activeTab === tab.id;
 
-            {/* Transaction Status Tabs */}
-            <div className="border-b border-gray-200 mb-4">
-                <nav className="-mb-px flex space-x-2" aria-label="Transaction Status">
-                    {tabs.map((tab) => {
-                        let tabCount = 0;
-                        let badgeClass = '';
+                            // Get tab count number based on status
+                            let count = 0;
+                            if (tab.id === 'pending') count = pendingCount;
+                            else if (tab.id === 'cancelled') count = cancelledCount;
 
-                        if (tab.id === 'pending') {
-                            tabCount = pendingCount;
-                            badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
-                        } else if (tab.id === 'cancelled') {
-                            tabCount = cancelledCount;
-                            badgeClass = 'bg-gray-100 text-gray-800 border-gray-200';
-                        }
-
-                        return (
-                            <button
-                                key={tab.id}
-                                onClick={() => handleTabChange(tab.id)}
-                                className={`${activeTab === tab.id
-                                    ? 'border-indigo-500 text-indigo-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                    } whitespace-nowrap py-3 px-4 border-b-2 font-medium text-sm flex items-center`}
-                                aria-current={activeTab === tab.id ? 'page' : undefined}
-                            >
-                                {tab.icon}
-                                {tab.label}
-                                {(tab.id === 'pending' || tab.id === 'cancelled') && (
-                                    <span className={`ml-2 px-2 py-0.5 text-xs font-medium rounded-full border ${badgeClass}`}>
-                                        {tabCount}
-                                    </span>
-                                )}
-                            </button>
-                        );
-                    })}
-                </nav>
-            </div>
-
-            {/* Tab description */}
-            <div className="text-sm text-gray-600 mb-4">
-                {getTabDescription()}
-            </div>
-
-            {/* Cheque Type Filter - Only show for pending and cancelled tabs */}
-            {(activeTab === 'pending' || activeTab === 'cancelled') && (
-                <div className="mb-4 bg-white p-3 border border-gray-200 rounded-lg shadow-sm">
-                    <div className="flex flex-wrap items-center">
-                        <span className="text-sm font-medium text-gray-700 mr-3">Filter cheque type:</span>
-                        <div className="flex bg-gray-100 rounded-md p-0.5">
-                            {chequeTypeOptions.map(option => (
+                            return (
                                 <button
-                                    key={option.value}
-                                    className={`px-3 py-1 rounded text-sm font-medium ${chequeTypeFilter === option.value
-                                        ? 'bg-indigo-600 text-white shadow-sm'
-                                        : 'text-gray-700 hover:bg-gray-200'
-                                        } transition-colors duration-150 ease-in-out`}
-                                    onClick={() => handleChequeTypeChange(option.value)}
+                                    key={tab.id}
+                                    onClick={() => handleTabChange(tab.id)}
+                                    className={`flex items-center py-2.5 px-4 text-xs font-medium relative transition-colors
+                                        ${isActive
+                                            ? 'text-primary-600 dark:text-primary-400 bg-white dark:bg-secondary-800'
+                                            : 'text-secondary-600 dark:text-secondary-400 hover:bg-gray-50 dark:hover:bg-secondary-700'}
+                                    `}
                                 >
-                                    {option.label}
-                                    {option.value === 'debit' && activeTab === 'pending' && pendingDebitCount > 0 && (
-                                        <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-200 text-indigo-800 text-xs rounded-full">{pendingDebitCount}</span>
+                                    {tab.icon}
+                                    <span>{tab.label}</span>
+
+                                    {/* Show count for pending and cancelled tabs */}
+                                    {count > 0 && (tab.id === 'pending' || tab.id === 'cancelled') && (
+                                        <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs
+                                            ${tab.id === 'pending'
+                                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'}
+                                        `}>
+                                            {count}
+                                        </span>
                                     )}
-                                    {option.value === 'credit' && activeTab === 'pending' && pendingCreditCount > 0 && (
-                                        <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-200 text-indigo-800 text-xs rounded-full">{pendingCreditCount}</span>
-                                    )}
-                                    {option.value === 'debit' && activeTab === 'cancelled' && cancelledDebitCount > 0 && (
-                                        <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-200 text-indigo-800 text-xs rounded-full">{cancelledDebitCount}</span>
-                                    )}
-                                    {option.value === 'credit' && activeTab === 'cancelled' && cancelledCreditCount > 0 && (
-                                        <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-200 text-indigo-800 text-xs rounded-full">{cancelledCreditCount}</span>
+
+                                    {/* Active indicator */}
+                                    {isActive && (
+                                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 dark:bg-primary-400"></div>
                                     )}
                                 </button>
-                            ))}
+                            );
+                        })}
+                    </div>
+
+                    {/* Cheque type filter for pending/cancelled tabs */}
+                    {(activeTab === 'pending' || activeTab === 'cancelled') && (
+                        <div className="flex items-center px-4 py-2.5 border-b border-gray-100 dark:border-secondary-700 bg-gray-50 dark:bg-secondary-800/50">
+                            <div className="text-xs text-secondary-500 dark:text-secondary-400 mr-2">Filter by:</div>
+                            <div className="flex space-x-2">
+                                {chequeTypeOptions.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        onClick={() => handleChequeTypeChange(option.value)}
+                                        className={`px-2.5 py-1 rounded-md text-xs transition-colors
+                                            ${chequeTypeFilter === option.value
+                                                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
+                                                : 'bg-white dark:bg-secondary-700 hover:bg-gray-100 dark:hover:bg-secondary-600 text-secondary-700 dark:text-secondary-300'}
+                                        `}
+                                    >
+                                        {option.label}
+                                        {/* Add count badge for specific options */}
+                                        {option.value !== 'all' && (
+                                            <span className="ml-1 text-xs">
+                                                ({activeTab === 'pending'
+                                                    ? (option.value === 'debit' ? pendingDebitCount : pendingCreditCount)
+                                                    : (option.value === 'debit' ? cancelledDebitCount : cancelledCreditCount)
+                                                })
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tab description */}
+                    <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/10 border-b border-gray-100 dark:border-secondary-700">
+                        <div className="flex items-center text-xs text-blue-700 dark:text-blue-400">
+                            <FaInfoCircle className="mr-2 flex-shrink-0" />
+                            <p>{getTabDescription()}</p>
                         </div>
                     </div>
                 </div>
-            )}
+            </div>
+        );
+    };
 
-            {/* Tab specific information banners */}
-            {activeTab === 'pending' && pendingTotal > 0 && (
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-sm flex items-center">
-                    <FaInfoCircle className="text-amber-500 mr-2 flex-shrink-0" />
-                    <div>
-                        <span className="font-medium">Pending cheques total: </span>
-                        {formatCurrency(pendingTotal)}
-                        <span className="ml-2 text-amber-600">These amounts are not yet deducted from the bank balance.</span>
-                        {filters.tx_type && (
-                            <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md text-xs font-medium border border-amber-200">
-                                Showing only {filters.tx_type === 'debit' ? 'outgoing' : 'incoming'} cheques
-                            </span>
-                        )}
-                    </div>
-                </div>
-            )}
+    return (
+        <>
+            {/* Render tabs at the top */}
+            {renderTabs()}
 
-            {activeTab === 'cancelled' && cancelledTotal > 0 && (
-                <div className="mb-4 p-3 bg-gray-50 border border-gray-200 text-gray-700 rounded-lg text-sm flex items-center">
-                    <FaInfoCircle className="text-gray-500 mr-2 flex-shrink-0" />
-                    <div>
-                        <span className="font-medium">Cancelled cheques value: </span>
-                        {formatCurrency(cancelledTotal)}
-                        <span className="ml-2 text-gray-600">These transactions have been cancelled and had no effect on balances.</span>
-                        {filters.tx_type && (
-                            <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-800 rounded-md text-xs font-medium border border-gray-200">
-                                Showing only {filters.tx_type === 'debit' ? 'outgoing' : 'incoming'} cheques
-                            </span>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {activeTab === 'completed' && (
-                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm flex items-center">
-                    <FaInfoCircle className="text-blue-500 mr-2 flex-shrink-0" />
-                    <div>
-                        <span>Showing completed transactions, including cleared cheques and regular debits/credits.</span>
-                    </div>
-                </div>
-            )}
-
-            {/* Filters form */}
+            {/* Filters section */}
             {showFilters && (
-                <div className="bg-white p-5 rounded-xl shadow-md border border-gray-100 mb-6">
-                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                        <FaFilter className="mr-2 text-indigo-500" />
-                        Transaction Filters
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
-                            <select
-                                name="account_id"
-                                value={filters.account_id}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Accounts</option>
-                                {accounts.map(account => (
-                                    <option key={account.id} value={account.id}>
-                                        {account.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Ledger Head</label>
-                            <select
-                                name="ledger_head_id"
-                                value={filters.ledger_head_id}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Ledger Heads</option>
-                                {ledgerHeads.map(ledgerHead => (
-                                    <option key={ledgerHead.id} value={ledgerHead.id}>
-                                        {ledgerHead.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Donor</label>
-                            <select
-                                name="donor_id"
-                                value={filters.donor_id}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Donors</option>
-                                {donors.map(donor => (
-                                    <option key={donor.id} value={donor.id}>
-                                        {donor.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Type</label>
-                            <select
-                                name="tx_type"
-                                value={filters.tx_type}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Types</option>
-                                <option value="credit">Credit (Income)</option>
-                                <option value="debit">Debit (Expense)</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                            <select
-                                name="cash_type"
-                                value={filters.cash_type}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Methods</option>
-                                <option value="cash">Cash</option>
-                                <option value="bank">Bank</option>
-                                <option value="upi">UPI</option>
-                                <option value="card">Card</option>
-                                <option value="netbank">Net Banking</option>
-                                <option value="multiple">Both (Cash & Bank)</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                            <select
-                                name="status"
-                                value={filters.status}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                <option value="">All Statuses</option>
-                                <option value="completed">Completed</option>
-                                <option value="pending">Pending</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
-                            <input
-                                type="date"
-                                name="start_date"
-                                value={filters.start_date}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
-                            <input
-                                type="date"
-                                name="end_date"
-                                value={filters.end_date}
-                                onChange={handleFilterChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                            />
-                        </div>
+                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden mb-4">
+                    <div className="px-4 py-3 border-b border-gray-100 dark:border-secondary-700">
+                        <h3 className="text-xs font-medium text-secondary-800 dark:text-white flex items-center">
+                            <FaFilter className="mr-2 text-primary-500 dark:text-primary-400" />
+                            Filter Transactions
+                        </h3>
                     </div>
 
-                    <div className="flex justify-end mt-4">
-                        <button
-                            onClick={clearFilters}
-                            className="mr-3 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        >
-                            <FaTimes className="mr-1.5 inline" />
-                            Clear Filters
-                        </button>
-                        <button
-                            onClick={fetchTransactions}
-                            className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        >
-                            <FaSearch className="mr-1.5 inline" />
-                            Apply Filters
-                        </button>
+                    <div className="p-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                            <div>
+                                <label className="block text-xs text-secondary-500 dark:text-secondary-400 mb-1">Account</label>
+                                <select
+                                    name="account_id"
+                                    value={filters.account_id}
+                                    onChange={handleFilterChange}
+                                    className="w-full rounded-md border border-gray-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 text-secondary-800 dark:text-white text-xs py-1.5 px-2"
+                                >
+                                    <option value="">All Accounts</option>
+                                    {accounts.map(account => (
+                                        <option key={account.id} value={account.id}>{account.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-secondary-500 dark:text-secondary-400 mb-1">Ledger Head</label>
+                                <select
+                                    name="ledger_head_id"
+                                    value={filters.ledger_head_id}
+                                    onChange={handleFilterChange}
+                                    className="w-full rounded-md border border-gray-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 text-secondary-800 dark:text-white text-xs py-1.5 px-2"
+                                >
+                                    <option value="">All Ledger Heads</option>
+                                    {ledgerHeads.map(head => (
+                                        <option key={head.id} value={head.id}>{head.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-secondary-500 dark:text-secondary-400 mb-1">From Date</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                                        <FaCalendarAlt className="w-3 h-3 text-secondary-400 dark:text-secondary-500" />
+                                    </div>
+                                    <input
+                                        type="date"
+                                        name="start_date"
+                                        value={filters.start_date}
+                                        onChange={handleFilterChange}
+                                        className="w-full pl-8 pr-2 py-1.5 rounded-md border border-gray-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 text-secondary-800 dark:text-white text-xs"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-secondary-500 dark:text-secondary-400 mb-1">To Date</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                                        <FaCalendarAlt className="w-3 h-3 text-secondary-400 dark:text-secondary-500" />
+                                    </div>
+                                    <input
+                                        type="date"
+                                        name="end_date"
+                                        value={filters.end_date}
+                                        onChange={handleFilterChange}
+                                        className="w-full pl-8 pr-2 py-1.5 rounded-md border border-gray-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 text-secondary-800 dark:text-white text-xs"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                                onClick={clearFilters}
+                                className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-secondary-700 dark:hover:bg-secondary-600 text-secondary-700 dark:text-secondary-300 rounded-md transition-colors"
+                            >
+                                <FaTimes className="mr-1 inline-block" />
+                                Clear Filters
+                            </button>
+                            <button
+                                onClick={fetchTransactions}
+                                className="px-3 py-1.5 text-xs bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+                            >
+                                <FaFilter className="mr-1 inline-block" />
+                                Apply Filters
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
 
-            <div className="bg-white rounded-xl overflow-hidden shadow-md border border-gray-100">
+            {/* Error message */}
+            {error && (
+                <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30 text-red-700 dark:text-red-400 rounded-xl p-4 mb-4">
+                    <div className="flex">
+                        <FaExclamationTriangle className="h-5 w-5 text-red-500 mr-2" aria-hidden="true" />
+                        <p className="text-sm">{error}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Transactions table */}
+            <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-secondary-700">
+                        <thead className="bg-gray-50 dark:bg-secondary-800">
                             <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Date
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Type
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Account / Ledger
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Receipt
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Amount
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Cheque #
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Due Date
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Payment
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Actions
-                                </th>
+                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Date</th>
+                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Type</th>
+                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Account / Ledger</th>
+                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Payment Method</th>
+                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Amount</th>
+                                <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {transactions.length > 0 ? (
-                                transactions.map(transaction => renderTransactionRow(transaction))
-                            ) : (
+                        <tbody className="bg-white dark:bg-secondary-800 divide-y divide-gray-100 dark:divide-secondary-700">
+                            {loading ? (
                                 <tr>
-                                    <td colSpan="9" className="px-6 py-10 text-center text-gray-500">
-                                        {loading ? (
-                                            <div className="flex justify-center items-center">
-                                                <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-indigo-500 mr-3"></div>
-                                                Loading transactions...
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col items-center">
-                                                <FaTable className="text-4xl text-gray-300 mb-3" />
-                                                <p className="text-lg">No transactions found</p>
-                                                <p className="text-sm mt-1">Try adjusting your filters or creating a new transaction</p>
-                                            </div>
-                                        )}
+                                    <td colSpan="6" className="px-3 py-8 text-center">
+                                        <div className="flex justify-center">
+                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
+                                        </div>
+                                        <p className="mt-2 text-sm text-secondary-500 dark:text-secondary-400">Loading transactions...</p>
                                     </td>
                                 </tr>
+                            ) : transactions.length === 0 ? (
+                                <tr>
+                                    <td colSpan="6" className="px-3 py-8 text-center">
+                                        <FaExchangeAlt className="mx-auto h-8 w-8 text-secondary-400 dark:text-secondary-600" />
+                                        <p className="mt-2 text-sm font-medium text-secondary-700 dark:text-secondary-300">No transactions found</p>
+                                        <p className="text-xs text-secondary-500 dark:text-secondary-400">Try adjusting your filters or add new transactions</p>
+                                    </td>
+                                </tr>
+                            ) : (
+                                transactions.map(transaction => renderTransactionRow(transaction))
                             )}
                         </tbody>
                     </table>
                 </div>
 
-                {/* Pagination controls */}
-                <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
-                    <div className="flex items-center">
-                        <span className="mr-3 text-sm">Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span></span>
-                        <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-                            <button
-                                className="px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed border-r border-gray-200 flex items-center"
-                                onClick={() => setPage(prev => Math.max(prev - 1, 1))}
-                                disabled={page === 1 || loading}
-                            >
-                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                                Prev
-                            </button>
-                            <button
-                                className="px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                                onClick={() => setPage(prev => Math.min(prev + 1, totalPages))}
-                                disabled={page >= totalPages || loading}
-                            >
-                                Next
-                                <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
+                {/* Pagination */}
+                {!loading && transactions.length > 0 && (
+                    <div className="border-t border-gray-100 dark:border-secondary-700 px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+                        <div className="text-xs text-secondary-500 dark:text-secondary-400">
+                            Showing {(page - 1) * limit + 1} to {Math.min(page * limit, totalTransactions)} of {totalTransactions} transactions
                         </div>
-                        <select
-                            value={limit}
-                            onChange={(e) => setLimit(Number(e.target.value))}
-                            className="ml-3 bg-white border border-gray-200 rounded-lg text-gray-700 px-2 py-1.5 shadow-sm text-sm"
-                            disabled={loading}
-                        >
-                            <option value={10}>10 per page</option>
-                            <option value={25}>25 per page</option>
-                            <option value={50}>50 per page</option>
-                            <option value={100}>100 per page</option>
-                        </select>
+                        {renderPagination()}
                     </div>
-                </div>
+                )}
             </div>
-
-            {/* Delete confirmation modal */}
-            {confirmDeleteId && (
-                <div className="fixed inset-0 overflow-y-auto z-50 flex items-center justify-center">
-                    <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={() => setConfirmDeleteId(null)}></div>
-                    <div className="relative bg-white rounded-lg max-w-md w-full mx-auto shadow-xl z-10 p-6">
-                        <div className="text-center">
-                            <FaExclamationTriangle className="mx-auto text-yellow-500 text-5xl mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">Confirm Transaction Deletion</h3>
-                            <p className="text-sm text-gray-500 mb-6">
-                                Are you sure you want to void this transaction? This action cannot be undone.
-                                This will reverse all balance changes that were made by this transaction.
-                            </p>
-                            <div className="flex justify-center space-x-3">
-                                <button
-                                    type="button"
-                                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md focus:outline-none"
-                                    onClick={() => setConfirmDeleteId(null)}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="button"
-                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md focus:outline-none"
-                                    onClick={() => {
-                                        // Handle delete
-                                        // For now just close the modal
-                                        setConfirmDeleteId(null);
-                                    }}
-                                >
-                                    Yes, Void Transaction
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+        </>
     );
 } 

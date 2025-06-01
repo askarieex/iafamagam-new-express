@@ -292,26 +292,25 @@ const Home = () => {
 
     if (loading) {
         return (
-            <div className="flex justify-center items-center h-full min-h-[400px]">
-                <div className="animate-pulse flex flex-col items-center">
-                    <div className="w-20 h-20 bg-primary-100 dark:bg-primary-900/20 rounded-full flex items-center justify-center">
-                        <FaChartLine className="text-primary-500 dark:text-primary-400 text-3xl animate-pulse" />
-                    </div>
-                    <div className="mt-4 text-secondary-600 dark:text-secondary-400">Loading dashboard...</div>
+            <div className="flex items-center justify-center h-full min-h-[60vh]">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto"></div>
+                    <div className="mt-4 text-lg font-medium text-secondary-600 dark:text-secondary-400">Loading dashboard...</div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-8 animate-fade-in">
+        <div className="w-full space-y-6 md:space-y-8 animate-fadeIn">
             {/* Stats overview section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-5">
+                {/* Total Balance */}
+                <div className="card p-4 md:p-5">
                     <div className="flex justify-between">
                         <div>
-                            <p className="text-sm text-secondary-500 dark:text-secondary-400">Total Balance</p>
-                            <h3 className="text-2xl font-bold text-secondary-900 dark:text-white mt-1">
+                            <p className="text-xs md:text-sm text-secondary-500 dark:text-secondary-400">Total Balance</p>
+                            <h3 className="text-xl md:text-2xl font-bold text-secondary-900 dark:text-white mt-1">
                                 {formatCurrency(totalBalance)}
                             </h3>
                             <p className="text-xs text-success-600 dark:text-success-400 flex items-center mt-2">
@@ -319,51 +318,54 @@ const Home = () => {
                                 <span>7.2% from last month</span>
                             </p>
                         </div>
-                        <div className="flex items-center justify-center w-12 h-12 bg-primary-50 dark:bg-primary-900/20 text-primary-500 dark:text-primary-400 rounded-lg">
-                            <FaMoneyBillWave size={20} />
+                        <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-primary-50 dark:bg-primary-900/20 text-primary-500 dark:text-primary-400 rounded-lg">
+                            <FaMoneyBillWave className="w-4 h-4 md:w-5 md:h-5" />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
+                {/* Hand Balance */}
+                <div className="card p-4 md:p-5">
                     <div className="flex justify-between">
                         <div>
-                            <p className="text-sm text-secondary-500 dark:text-secondary-400">Hand Balance</p>
-                            <h3 className="text-2xl font-bold text-secondary-900 dark:text-white mt-1">
+                            <p className="text-xs md:text-sm text-secondary-500 dark:text-secondary-400">Hand Balance</p>
+                            <h3 className="text-xl md:text-2xl font-bold text-secondary-900 dark:text-white mt-1">
                                 {formatCurrency(accounts.reduce((sum, account) => sum + account.hand_balance, 0))}
                             </h3>
                             <p className="text-xs text-secondary-500 dark:text-secondary-400 flex items-center mt-2">
                                 <span>{Math.round((accounts.reduce((sum, account) => sum + account.hand_balance, 0) / totalBalance) * 100)}% of total</span>
                             </p>
                         </div>
-                        <div className="flex items-center justify-center w-12 h-12 bg-success-50 dark:bg-success-900/20 text-success-500 dark:text-success-400 rounded-lg">
-                            <FaHandHolding size={20} />
+                        <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-success-50 dark:bg-success-900/20 text-success-500 dark:text-success-400 rounded-lg">
+                            <FaHandHolding className="w-4 h-4 md:w-5 md:h-5" />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
+                {/* Bank Balance */}
+                <div className="card p-4 md:p-5">
                     <div className="flex justify-between">
                         <div>
-                            <p className="text-sm text-secondary-500 dark:text-secondary-400">Bank Balance</p>
-                            <h3 className="text-2xl font-bold text-secondary-900 dark:text-white mt-1">
+                            <p className="text-xs md:text-sm text-secondary-500 dark:text-secondary-400">Bank Balance</p>
+                            <h3 className="text-xl md:text-2xl font-bold text-secondary-900 dark:text-white mt-1">
                                 {formatCurrency(accounts.reduce((sum, account) => sum + account.bank_balance, 0))}
                             </h3>
                             <p className="text-xs text-secondary-500 dark:text-secondary-400 flex items-center mt-2">
                                 <span>{Math.round((accounts.reduce((sum, account) => sum + account.bank_balance, 0) / totalBalance) * 100)}% of total</span>
                             </p>
                         </div>
-                        <div className="flex items-center justify-center w-12 h-12 bg-info-50 dark:bg-info-900/20 text-info-500 dark:text-info-400 rounded-lg">
-                            <FaUniversity size={20} />
+                        <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-info-50 dark:bg-info-900/20 text-info-500 dark:text-info-400 rounded-lg">
+                            <FaUniversity className="w-4 h-4 md:w-5 md:h-5" />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
+                {/* Monthly Transactions */}
+                <div className="card p-4 md:p-5">
                     <div className="flex justify-between">
                         <div>
-                            <p className="text-sm text-secondary-500 dark:text-secondary-400">Monthly Transactions</p>
-                            <h3 className="text-2xl font-bold text-secondary-900 dark:text-white mt-1">
+                            <p className="text-xs md:text-sm text-secondary-500 dark:text-secondary-400">Monthly Transactions</p>
+                            <h3 className="text-xl md:text-2xl font-bold text-secondary-900 dark:text-white mt-1">
                                 142
                             </h3>
                             <p className="text-xs text-danger-600 dark:text-danger-400 flex items-center mt-2">
@@ -371,8 +373,8 @@ const Home = () => {
                                 <span>3.1% from last month</span>
                             </p>
                         </div>
-                        <div className="flex items-center justify-center w-12 h-12 bg-secondary-50 dark:bg-secondary-700/30 text-secondary-500 dark:text-secondary-400 rounded-lg">
-                            <FaExchangeAlt size={20} />
+                        <div className="flex items-center justify-center w-10 h-10 md:w-12 md:h-12 bg-secondary-50 dark:bg-secondary-700/30 text-secondary-500 dark:text-secondary-400 rounded-lg">
+                            <FaExchangeAlt className="w-4 h-4 md:w-5 md:h-5" />
                         </div>
                     </div>
                 </div>
@@ -380,16 +382,16 @@ const Home = () => {
 
             {/* Accounts section */}
             <div>
-                <div className="flex flex-col md:flex-row md:items-center justify-between mb-5">
-                    <h2 className="text-xl font-semibold text-secondary-900 dark:text-white flex items-center">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 md:mb-4">
+                    <h2 className="text-lg md:text-xl font-semibold text-secondary-900 dark:text-white flex items-center">
                         <FaUniversity className="mr-2 text-primary-500 dark:text-primary-400" /> Accounts Overview
                     </h2>
-                    <button className="mt-2 md:mt-0 flex items-center text-sm text-primary-600 dark:text-primary-400 
+                    <button className="mt-2 sm:mt-0 flex items-center text-sm text-primary-600 dark:text-primary-400 
                                        hover:text-primary-700 dark:hover:text-primary-300 transition-colors">
                         View All Accounts <FaArrowRight className="ml-1 text-xs" />
                     </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                     {accounts.map(account => (
                         <AccountCard key={account.id} account={account} />
                     ))}
@@ -397,18 +399,18 @@ const Home = () => {
             </div>
 
             {/* Charts section */}
-            <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-5">
                 {/* Line chart - Financial trend */}
-                <div className="lg:col-span-2 bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-4">
-                        <h3 className="text-lg font-semibold text-secondary-900 dark:text-white">Financial Overview</h3>
-                        <div className="flex space-x-2">
+                <div className="card lg:col-span-2 p-4 md:p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 md:mb-5 gap-2">
+                        <h3 className="text-base md:text-lg font-semibold text-secondary-900 dark:text-white">Financial Overview</h3>
+                        <div className="flex flex-wrap gap-2">
                             <div className="relative inline-flex">
                                 <select
                                     value={selectedChart}
                                     onChange={(e) => setSelectedChart(e.target.value)}
                                     className="appearance-none bg-secondary-50 dark:bg-secondary-700/30 border border-secondary-200 dark:border-secondary-600 
-                                              text-secondary-700 dark:text-secondary-300 rounded-lg py-1.5 pl-3 pr-10 text-sm focus:outline-none
+                                              text-secondary-700 dark:text-secondary-300 rounded-lg py-1 pl-2 pr-8 text-sm focus:outline-none
                                               focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-primary-500 dark:focus:border-primary-400"
                                 >
                                     <option value="revenue">Revenue</option>
@@ -424,7 +426,7 @@ const Home = () => {
                                     value={selectedPeriod}
                                     onChange={(e) => setSelectedPeriod(e.target.value)}
                                     className="appearance-none bg-secondary-50 dark:bg-secondary-700/30 border border-secondary-200 dark:border-secondary-600 
-                                              text-secondary-700 dark:text-secondary-300 rounded-lg py-1.5 pl-3 pr-10 text-sm focus:outline-none
+                                              text-secondary-700 dark:text-secondary-300 rounded-lg py-1 pl-2 pr-8 text-sm focus:outline-none
                                               focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-primary-500 dark:focus:border-primary-400"
                                 >
                                     <option value="week">This Week</option>
@@ -438,7 +440,7 @@ const Home = () => {
                             </div>
                         </div>
                     </div>
-                    <div className="h-72">
+                    <div className="h-56 sm:h-64 md:h-72">
                         {monthlyData.labels && (
                             <Line
                                 data={{
@@ -452,9 +454,9 @@ const Home = () => {
                 </div>
 
                 {/* Doughnut chart - Income sources */}
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 p-5">
-                    <h3 className="text-lg font-semibold text-secondary-900 dark:text-white mb-5">Income Sources</h3>
-                    <div className="h-60">
+                <div className="card p-4 md:p-5">
+                    <h3 className="text-base md:text-lg font-semibold text-secondary-900 dark:text-white mb-4">Income Sources</h3>
+                    <div className="h-52 md:h-60">
                         {categoryData.labels && (
                             <Doughnut
                                 data={categoryData}
@@ -465,10 +467,10 @@ const Home = () => {
                 </div>
             </div>
 
-            {/* Recent transactions (placeholder) */}
-            <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-secondary-200 dark:border-secondary-700 overflow-hidden">
-                <div className="flex items-center justify-between p-5 border-b border-secondary-200 dark:border-secondary-700">
-                    <h3 className="text-lg font-semibold text-secondary-900 dark:text-white flex items-center">
+            {/* Recent transactions */}
+            <div className="card overflow-hidden">
+                <div className="flex items-center justify-between p-4 border-b border-secondary-200 dark:border-secondary-700">
+                    <h3 className="text-base md:text-lg font-semibold text-secondary-900 dark:text-white flex items-center">
                         <FaExchangeAlt className="mr-2 text-primary-500 dark:text-primary-400" /> Recent Transactions
                     </h3>
                     <button className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors">
@@ -479,16 +481,16 @@ const Home = () => {
                     <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700">
                         <thead className="bg-secondary-50 dark:bg-secondary-800">
                             <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
+                                <th scope="col" className="px-3 md:px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
                                     Transaction
                                 </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
+                                <th scope="col" className="px-3 md:px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
                                     Account
                                 </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
+                                <th scope="col" className="px-3 md:px-6 py-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
                                     Date
                                 </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
+                                <th scope="col" className="px-3 md:px-6 py-3 text-right text-xs font-medium text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">
                                     Amount
                                 </th>
                             </tr>
@@ -496,16 +498,16 @@ const Home = () => {
                         <tbody className="bg-white dark:bg-secondary-800 divide-y divide-secondary-200 dark:divide-secondary-700">
                             {[1, 2, 3, 4, 5].map((item) => (
                                 <tr key={item} className="hover:bg-secondary-50 dark:hover:bg-secondary-700/50 transition-colors">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-secondary-900 dark:text-white">
+                                    <td className="px-3 md:px-6 py-3 whitespace-nowrap text-sm font-medium text-secondary-900 dark:text-white">
                                         Payment to Vendor
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-secondary-700 dark:text-secondary-300">
+                                    <td className="px-3 md:px-6 py-3 whitespace-nowrap text-sm text-secondary-700 dark:text-secondary-300">
                                         General Account
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-secondary-700 dark:text-secondary-300">
+                                    <td className="px-3 md:px-6 py-3 whitespace-nowrap text-sm text-secondary-700 dark:text-secondary-300">
                                         {new Date().toLocaleDateString()}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-danger-600 dark:text-danger-400">
+                                    <td className="px-3 md:px-6 py-3 whitespace-nowrap text-sm text-right font-medium text-danger-600 dark:text-danger-400">
                                         -₹ 2,500
                                     </td>
                                 </tr>

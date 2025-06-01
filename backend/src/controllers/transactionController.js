@@ -23,7 +23,52 @@ class TransactionController {
                 });
             }
 
+            // Check if transaction date is in a closed period
+            const account = await db.Account.findByPk(creditData.account_id);
+            if (!account) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Account not found'
+                });
+            }
+
+            // If account has a last closed date and transaction date is in or before closed period
+            if (account.last_closed_date &&
+                new Date(creditData.tx_date) <= new Date(account.last_closed_date)) {
+                // Allow admin override if specified
+                if (!creditData.admin_override) {
+                    return res.status(403).json({
+                        success: false,
+                        message: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can make changes to closed periods.`
+                    });
+                }
+
+                // If we get here, the user is an admin and has confirmed the override
+                console.log(`Admin override used for credit transaction in closed period: ${creditData.tx_date}`);
+            }
+
             const transaction = await transactionService.createCredit(creditData);
+
+            // If this was an admin override for a closed period, recalculate the monthly snapshots
+            if (creditData.admin_override && account.last_closed_date &&
+                new Date(creditData.tx_date) <= new Date(account.last_closed_date)) {
+                try {
+                    // Import the service here to avoid circular dependencies
+                    const monthlyClosureService = require('../services/monthlyClosureService');
+
+                    // Recalculate snapshots from the transaction date forward
+                    await monthlyClosureService.recalculateMonthlySnapshots(
+                        creditData.account_id,
+                        creditData.ledger_head_id,
+                        creditData.tx_date
+                    );
+
+                    console.log(`Recalculated monthly snapshots after backdated credit transaction: ${creditData.tx_date}`);
+                } catch (recalcError) {
+                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    // Don't fail the request, just log the error
+                }
+            }
 
             return res.status(201).json({
                 success: true,
@@ -58,7 +103,61 @@ class TransactionController {
                 });
             }
 
+            // Check if transaction date is in a closed period
+            const account = await db.Account.findByPk(debitData.account_id);
+            if (!account) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Account not found'
+                });
+            }
+
+            // If account has a last closed date and transaction date is in or before closed period
+            if (account.last_closed_date &&
+                new Date(debitData.tx_date) <= new Date(account.last_closed_date)) {
+                // Allow admin override if specified
+                if (!debitData.admin_override) {
+                    return res.status(403).json({
+                        success: false,
+                        message: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can make changes to closed periods.`
+                    });
+                }
+
+                // If we get here, the user is an admin and has confirmed the override
+                console.log(`Admin override used for debit transaction in closed period: ${debitData.tx_date}`);
+            }
+
             const transaction = await transactionService.createDebit(debitData);
+
+            // If this was an admin override for a closed period, recalculate the monthly snapshots
+            if (debitData.admin_override && account.last_closed_date &&
+                new Date(debitData.tx_date) <= new Date(account.last_closed_date)) {
+                try {
+                    // Import the service here to avoid circular dependencies
+                    const monthlyClosureService = require('../services/monthlyClosureService');
+
+                    // Recalculate snapshots for the target ledger head
+                    await monthlyClosureService.recalculateMonthlySnapshots(
+                        debitData.account_id,
+                        debitData.ledger_head_id,
+                        debitData.tx_date
+                    );
+
+                    // Also recalculate for each source ledger head
+                    for (const source of debitData.sources) {
+                        await monthlyClosureService.recalculateMonthlySnapshots(
+                            debitData.account_id,
+                            source.ledger_head_id,
+                            debitData.tx_date
+                        );
+                    }
+
+                    console.log(`Recalculated monthly snapshots after backdated debit transaction: ${debitData.tx_date}`);
+                } catch (recalcError) {
+                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    // Don't fail the request, just log the error
+                }
+            }
 
             return res.status(201).json({
                 success: true,
@@ -179,7 +278,72 @@ class TransactionController {
                 });
             }
 
+            // Get the transaction to check its date
+            const transaction = await db.Transaction.findByPk(id);
+            if (!transaction) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Transaction not found'
+                });
+            }
+
+            // Check if transaction is in a closed period
+            const account = await db.Account.findByPk(transaction.account_id);
+            if (account && account.last_closed_date &&
+                new Date(transaction.tx_date) <= new Date(account.last_closed_date)) {
+                // Allow admin override if specified
+                if (!req.body.admin_override) {
+                    return res.status(403).json({
+                        success: false,
+                        message: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can make changes to closed periods.`
+                    });
+                }
+
+                // If we get here, the user is an admin and has confirmed the override
+                console.log(`Admin override used for voiding transaction in closed period: ${transaction.tx_date}`);
+            }
+
+            // Store the date and ledger head info for recalculation if needed
+            const txDate = transaction.tx_date;
+            const accountId = transaction.account_id;
+            const ledgerHeadId = transaction.ledger_head_id;
+
+            // Get transaction items to know which ledgers were affected
+            const transactionItems = await db.TransactionItem.findAll({
+                where: { transaction_id: id }
+            });
+
+            // Create a set of affected ledger head IDs
+            const affectedLedgerHeadIds = new Set();
+            affectedLedgerHeadIds.add(ledgerHeadId);
+            transactionItems.forEach(item => {
+                affectedLedgerHeadIds.add(item.ledger_head_id);
+            });
+
             const result = await transactionService.voidTransaction(id);
+
+            // If this was an admin override for a closed period, recalculate the monthly snapshots
+            if (req.body.admin_override && account.last_closed_date &&
+                new Date(txDate) <= new Date(account.last_closed_date)) {
+                try {
+                    // Import the service here to avoid circular dependencies
+                    const monthlyClosureService = require('../services/monthlyClosureService');
+
+                    // Recalculate snapshots for all affected ledger heads
+                    for (const ledgerId of affectedLedgerHeadIds) {
+                        await monthlyClosureService.recalculateMonthlySnapshots(
+                            accountId,
+                            ledgerId,
+                            txDate
+                        );
+                    }
+
+                    console.log(`Recalculated monthly snapshots after voiding transaction in closed period: ${txDate}`);
+                } catch (recalcError) {
+                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    // Don't fail the request, just log the error
+                }
+            }
 
             return res.status(200).json({
                 success: true,

@@ -129,6 +129,23 @@ module.exports = (sequelize) => {
             type: DataTypes.ENUM('pending', 'completed', 'cancelled'),
             defaultValue: 'completed',
             allowNull: false
+        },
+        // Add cheque-related fields to store this information directly on transactions
+        cheque_number: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        bank_name: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        issue_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: true
+        },
+        due_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: true
         }
     }, {
         sequelize,

@@ -61,6 +61,11 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     const sourceLedgerDropdownRef = useRef(null);
     const debitLedgerDropdownRef = useRef(null);
 
+    // Add these state variables with the other useState declarations
+    const [selectedAccount, setSelectedAccount] = useState(null);
+    const [showAdminOverrideModal, setShowAdminOverrideModal] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(true); // In a real app, this would come from auth
+
     // Configure axios
     const api = axios.create({
         baseURL: API_CONFIG.BASE_URL,
@@ -154,6 +159,18 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         source_ledger_head_id: creditLedgerHead ? creditLedgerHead.id : '',
                         ledger_head_id: debitLedgerHead ? debitLedgerHead.id : ''
                     }));
+                }
+
+                // Add this to fetchFormData function, after loading accounts
+                if (accountsRes.data.data.length > 0) {
+                    // Get selected account details if account is selected
+                    if (formData.account_id) {
+                        const selectedAccount = accountsRes.data.data.find(acc => acc.id === parseInt(formData.account_id));
+                        if (selectedAccount && selectedAccount.last_closed_date) {
+                            // Store the last closed date for date validation
+                            setSelectedAccount(selectedAccount);
+                        }
+                    }
                 }
 
                 setLoading(false);
@@ -533,6 +550,16 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             }
         }
 
+        // Add this inside validateForm function
+        if (formData.tx_date && selectedAccount && selectedAccount.last_closed_date) {
+            const txDate = new Date(formData.tx_date);
+            const closedDate = new Date(selectedAccount.last_closed_date);
+
+            if (txDate <= closedDate) {
+                newErrors.tx_date = `This date falls in a closed accounting period. Periods up to ${new Date(selectedAccount.last_closed_date).toLocaleDateString()} are locked.`;
+            }
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -546,17 +573,41 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Validate form
         if (!validateForm()) {
-            // Scroll to the first error
-            const firstErrorElement = document.querySelector('.error-message');
-            if (firstErrorElement) {
-                firstErrorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
             return;
         }
 
+        // Check for closed period that might need admin override
+        if (formData.tx_date && selectedAccount && selectedAccount.last_closed_date) {
+            const txDate = new Date(formData.tx_date);
+            const closedDate = new Date(selectedAccount.last_closed_date);
+
+            if (txDate <= closedDate && isAdmin) {
+                // Show admin override confirmation modal
+                setShowAdminOverrideModal(true);
+                return;
+            }
+        }
+
+        // Normal submission process continues
+        await submitTransaction();
+    };
+
+    // Add these new functions for admin override
+    const handleAdminOverride = async () => {
+        setShowAdminOverrideModal(false);
+        // Add admin override flag to the form data
+        await submitTransaction(true);
+    };
+
+    const submitTransaction = async (adminOverride = false) => {
         try {
+            let dataToSubmit = { ...formData };
+
+            if (adminOverride) {
+                dataToSubmit.admin_override = true;
+            }
+
             setSubmitting(true);
             setError(null);
 
@@ -748,7 +799,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     };
 
     // Component to calculate and display projected balance
-    const ProjectedBalance = ({ ledgerId, amountToDeduct, cashType }) => {
+    const ProjectedBalance = ({ledgerId, amountToDeduct, cashType}) => {
         const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
         if (!ledger) return null;
 
@@ -817,6 +868,53 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             // If toggling back to automatic, regenerate the voucher number
             voucher_number: !isManual ? generateVoucherNumber() : prev.voucher_number
         }));
+    };
+
+    // Handle payment method selection
+    const handlePaymentMethodSelect = (method) => {
+        if (method === 'cheque') {
+            // When switching to cheque, set up cheque-specific values
+            const today = new Date().toISOString().split('T')[0];
+            // Set default due date as 5 days from today
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + 5);
+            const dueDateStr = dueDate.toISOString().split('T')[0];
+
+            setFormData(prev => ({
+                ...prev,
+                cash_type: 'cheque', // Explicitly set to 'cheque' to ensure proper saving
+                is_cheque: true,     // For backward compatibility
+                issue_date: prev.issue_date || today,
+                due_date: prev.due_date || dueDateStr,
+                // Keep the amount if it exists
+                amount: prev.amount || '',
+                // Clear these as they're not used with cheque
+                cash_amount: '',
+                bank_amount: '',
+            }));
+        } else {
+            setFormData(prev => ({
+                ...prev,
+                cash_type: method,
+                is_cheque: false,
+                // Clear cheque specific fields
+                cheque_number: '',
+                bank_name: '',
+                issue_date: '',
+                due_date: ''
+            }));
+        }
+    };
+
+    // Add this function to handle account change
+    const handleAccountChange = (accountId) => {
+        const account = accounts.find(acc => acc.id === parseInt(accountId));
+        setSelectedAccount(account);
+        setFormData({
+            ...formData,
+            account_id: accountId
+        });
+        // Additional functionality like fetching related ledger heads can go here
     };
 
     return (
@@ -1512,199 +1610,199 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             )}
                         </div>
-                    )}{/* Voucher, Date and Description - All in one row */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                        {/* Voucher Number */}
-                        <div>
-                            <label className="flex justify-between text-xs font-medium text-gray-700 mb-1">
-                                <span>Voucher Number *</span>
-                                <div className="flex items-center">
-                                    <input
-                                        type="checkbox"
-                                        id="manual_voucher"
-                                        name="manual_voucher"
-                                        checked={formData.manual_voucher}
-                                        onChange={handleManualVoucherToggle}
-                                        className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                                    />
-                                    <label htmlFor="manual_voucher" className="text-xs text-gray-600">
-                                        Allot Manually
-                                    </label>
+                                )}{/* Voucher, Date and Description - All in one row */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                    {/* Voucher Number */}
+                                    <div>
+                                        <label className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                                            <span>Voucher Number *</span>
+                                            <div className="flex items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    id="manual_voucher"
+                                                    name="manual_voucher"
+                                                    checked={formData.manual_voucher}
+                                                    onChange={handleManualVoucherToggle}
+                                                    className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                                />
+                                                <label htmlFor="manual_voucher" className="text-xs text-gray-600">
+                                                    Allot Manually
+                                                </label>
+                                            </div>
+                                        </label>
+                                        <div className="relative">
+                                            {formData.manual_voucher ? (
+                                                <input
+                                                    type="text"
+                                                    name="voucher_number"
+                                                    id="voucher_number"
+                                                    value={formData.voucher_number}
+                                                    onChange={handleInputChange}
+                                                    placeholder="CV-serial/MM/YY"
+                                                    className={`w-full p-2 border ${errors.voucher_number ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                                    aria-invalid={!!errors.voucher_number}
+                                                    aria-describedby={errors.voucher_number ? "voucher_error" : undefined}
+                                                />
+                                            ) : (
+                                                <div className="bg-gray-100 border border-gray-200 rounded-full px-4 py-2 text-center font-medium text-gray-700">
+                                                    {formData.voucher_number}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {errors.voucher_number && (
+                                            <p id="voucher_error" className="text-red-500 text-xs mt-1 error-message">{errors.voucher_number}</p>
+                                        )}
+                                    </div>
+
+                                    {/* Transaction Date */}
+                                    <div>
+                                        <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
+                                            <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
+                                            Transaction Date *
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                id="tx_date"
+                                                type="date"
+                                                name="tx_date"
+                                                value={formData.tx_date}
+                                                onChange={handleInputChange}
+                                                className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                                aria-invalid={!!errors.tx_date}
+                                                aria-describedby={errors.tx_date ? "date_error" : undefined}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const today = new Date().toISOString().split('T')[0];
+                                                    setFormData(prev => ({ ...prev, tx_date: today }));
+                                                }}
+                                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
+                                            >
+                                                Today
+                                            </button>
+                                            {/* Display formatted date for better readability */}
+                                            {formData.tx_date && (
+                                                <div className="text-xs mt-1 text-gray-500">
+                                                    {new Date(formData.tx_date).toLocaleDateString('en-IN', {
+                                                        day: '2-digit',
+                                                        month: '2-digit',
+                                                        year: 'numeric'
+                                                    }).replace(/\//g, '-')}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {errors.tx_date && (
+                                            <p id="date_error" className="text-red-500 text-xs mt-1 error-message" aria-live="polite">{errors.tx_date}</p>
+                                        )}
+                                    </div>
+
+                                    {/* Description */}
+                                    <div>
+                                        <label htmlFor="description" className="block text-xs font-medium text-gray-700 mb-1">
+                                            Description (Optional)
+                                        </label>
+                                        <div className="relative">
+                                            <textarea
+                                                id="description"
+                                                name="description"
+                                                value={formData.description}
+                                                onChange={handleInputChange}
+                                                placeholder="Example: Purchase of office supplies"
+                                                className="w-full p-2 border border-gray-300 rounded-md"
+                                                rows="2"
+                                                maxLength="120"
+                                                aria-describedby="desc_counter"
+                                            ></textarea>
+                                            <div id="desc_counter" className="text-xs text-gray-500 text-right mt-1">
+                                                {formData.description.length}/120 characters
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </label>
-                            <div className="relative">
-                                {formData.manual_voucher ? (
-                                    <input
-                                        type="text"
-                                        name="voucher_number"
-                                        id="voucher_number"
-                                        value={formData.voucher_number}
-                                        onChange={handleInputChange}
-                                        placeholder="CV-serial/MM/YY"
-                                        className={`w-full p-2 border ${errors.voucher_number ? 'border-red-500' : 'border-gray-300'} rounded-md`}
-                                        aria-invalid={!!errors.voucher_number}
-                                        aria-describedby={errors.voucher_number ? "voucher_error" : undefined}
-                                    />
-                                ) : (
-                                    <div className="bg-gray-100 border border-gray-200 rounded-full px-4 py-2 text-center font-medium text-gray-700">
-                                        {formData.voucher_number}
+
+                                {/* Form Actions */}
+                                <div className="flex justify-end space-x-5 mt-10 pt-6 border-t border-gray-100">
+                                    <button
+                                        type="button"
+                                        onClick={onCancel}
+                                        className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 flex items-center font-medium transition-all duration-200 shadow-sm hover:shadow"
+                                        disabled={submitting}
+                                    >
+                                        <FaTimes className="mr-2 text-gray-500" />
+                                        <span>Cancel</span>
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
+                                        disabled={submitting}
+                                    >
+                                        {submitting ? (
+                                            <div className="flex items-center">
+                                                <div className="w-5 h-5 mr-3 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
+                                                <span>{isEditing ? 'Updating...' : 'Saving...'}</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center">
+                                                <FaSave className="mr-2" />
+                                                <span>{isEditing ? 'Update Transaction' : 'Save Transaction'}</span>
+                                            </div>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Additional note about balance changes */}
+                                {formData.source_ledger_head_id && formData.ledger_head_id && (
+                                    <div className="mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">
+                                        <div className="flex items-start">
+                                            <div className="bg-indigo-100 p-2 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                                                <FaInfoCircle className="text-indigo-500" />
+                                            </div>
+                                            <div>
+                                                <p className="font-medium mb-1">Balance Changes Summary:</p>
+                                                <p>Funds will be transferred from <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || ''}</span> to <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || ''}</span>.</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
-                            </div>
-                            {errors.voucher_number && (
-                                <p id="voucher_error" className="text-red-500 text-xs mt-1 error-message">{errors.voucher_number}</p>
-                            )}
-                        </div>
+                            </form>
+                        )}
 
-                        {/* Transaction Date */}
-                        <div>
-                            <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
-                                <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
-                                Transaction Date *
-                            </label>
-                            <div className="relative">
-                                <input
-                                    id="tx_date"
-                                    type="date"
-                                    name="tx_date"
-                                    value={formData.tx_date}
-                                    onChange={handleInputChange}
-                                    className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
-                                    aria-invalid={!!errors.tx_date}
-                                    aria-describedby={errors.tx_date ? "date_error" : undefined}
+                        {/* Additional balance displays and projected balances */}
+                        {formData.source_ledger_head_id && formData.amount && formData.cash_type !== 'multiple' && (
+                            <ProjectedBalance
+                                ledgerId={formData.source_ledger_head_id}
+                                amountToDeduct={formData.amount}
+                                cashType={formData.cash_type}
+                            />
+                        )}
+
+                        {formData.source_ledger_head_id && formData.cash_type === 'multiple' &&
+                            (formData.cash_amount || formData.bank_amount) && (
+                                <ProjectedBalance
+                                    ledgerId={formData.source_ledger_head_id}
+                                    cashType="multiple"
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const today = new Date().toISOString().split('T')[0];
-                                        setFormData(prev => ({ ...prev, tx_date: today }));
-                                    }}
-                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
-                                >
-                                    Today
-                                </button>
-                                {/* Display formatted date for better readability */}
-                                {formData.tx_date && (
-                                    <div className="text-xs mt-1 text-gray-500">
-                                        {new Date(formData.tx_date).toLocaleDateString('en-IN', {
-                                            day: '2-digit',
-                                            month: '2-digit',
-                                            year: 'numeric'
-                                        }).replace(/\//g, '-')}
+                            )}
+
+                        {/* Total Amount Display for Both */}
+                        {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
+                            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-200 shadow-sm animate-fadeIn hover:shadow-md transition-all duration-200">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center">
+                                        <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mr-4 shadow-sm">
+                                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                            </svg>
+                                        </div>
+                                        <span className="text-base font-medium text-gray-700">Total Amount:</span>
                                     </div>
-                                )}
-                            </div>
-                            {errors.tx_date && (
-                                <p id="date_error" className="text-red-500 text-xs mt-1 error-message" aria-live="polite">{errors.tx_date}</p>
-                            )}
-                        </div>
-
-                        {/* Description */}
-                        <div>
-                            <label htmlFor="description" className="block text-xs font-medium text-gray-700 mb-1">
-                                Description (Optional)
-                            </label>
-                            <div className="relative">
-                                <textarea
-                                    id="description"
-                                    name="description"
-                                    value={formData.description}
-                                    onChange={handleInputChange}
-                                    placeholder="Example: Purchase of office supplies"
-                                    className="w-full p-2 border border-gray-300 rounded-md"
-                                    rows="2"
-                                    maxLength="120"
-                                    aria-describedby="desc_counter"
-                                ></textarea>
-                                <div id="desc_counter" className="text-xs text-gray-500 text-right mt-1">
-                                    {formData.description.length}/120 characters
+                                    <span className="text-2xl font-bold text-indigo-700">
+                                        ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
+                                    </span>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </div>
-
-                    {/* Form Actions */}
-                    <div className="flex justify-end space-x-5 mt-10 pt-6 border-t border-gray-100">
-                        <button
-                            type="button"
-                            onClick={onCancel}
-                            className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 flex items-center font-medium transition-all duration-200 shadow-sm hover:shadow"
-                            disabled={submitting}
-                        >
-                            <FaTimes className="mr-2 text-gray-500" />
-                            <span>Cancel</span>
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
-                            disabled={submitting}
-                        >
-                            {submitting ? (
-                                <div className="flex items-center">
-                                    <div className="w-5 h-5 mr-3 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
-                                    <span>{isEditing ? 'Updating...' : 'Saving...'}</span>
-                                </div>
-                            ) : (
-                                <div className="flex items-center">
-                                    <FaSave className="mr-2" />
-                                    <span>{isEditing ? 'Update Transaction' : 'Save Transaction'}</span>
-                                </div>
-                            )}
-                        </button>
-                    </div>
-
-                    {/* Additional note about balance changes */}
-                    {formData.source_ledger_head_id && formData.ledger_head_id && (
-                        <div className="mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">
-                            <div className="flex items-start">
-                                <div className="bg-indigo-100 p-2 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                                    <FaInfoCircle className="text-indigo-500" />
-                                </div>
-                                <div>
-                                    <p className="font-medium mb-1">Balance Changes Summary:</p>
-                                    <p>Funds will be transferred from <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || ''}</span> to <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || ''}</span>.</p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </form>
-            )}
-
-            {/* Additional balance displays and projected balances */}
-            {formData.source_ledger_head_id && formData.amount && formData.cash_type !== 'multiple' && (
-                <ProjectedBalance
-                    ledgerId={formData.source_ledger_head_id}
-                    amountToDeduct={formData.amount}
-                    cashType={formData.cash_type}
-                />
-            )}
-
-            {formData.source_ledger_head_id && formData.cash_type === 'multiple' &&
-                (formData.cash_amount || formData.bank_amount) && (
-                    <ProjectedBalance
-                        ledgerId={formData.source_ledger_head_id}
-                        cashType="multiple"
-                    />
-                )}
-
-            {/* Total Amount Display for Both */}
-            {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
-                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-200 shadow-sm animate-fadeIn hover:shadow-md transition-all duration-200">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center">
-                            <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mr-4 shadow-sm">
-                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                </svg>
-                            </div>
-                            <span className="text-base font-medium text-gray-700">Total Amount:</span>
-                        </div>
-                        <span className="text-2xl font-bold text-indigo-700">
-                            ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
-                        </span>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+                    );
 } 

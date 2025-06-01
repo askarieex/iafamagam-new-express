@@ -401,7 +401,14 @@ class TransactionService {
                 cash_type: actualCashType,
                 tx_date: data.tx_date,
                 description: data.description,
-                status: (data.is_cheque || actualCashType === 'cheque') ? 'pending' : 'completed'
+                status: (data.is_cheque || actualCashType === 'cheque') ? 'pending' : 'completed',
+                // Store cheque details directly on transaction for failsafe
+                ...(actualCashType === 'cheque' || data.is_cheque ? {
+                    cheque_number: data.cheque_number,
+                    bank_name: data.bank_name,
+                    issue_date: data.issue_date,
+                    due_date: data.due_date
+                } : {})
             }, { transaction: t });
 
             // Create transaction items for the target

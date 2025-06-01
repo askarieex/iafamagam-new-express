@@ -53,6 +53,11 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const [donors, setDonors] = useState([]);
     const [booklets, setBooklets] = useState([]);
 
+    // Period closure fields
+    const [selectedAccount, setSelectedAccount] = useState(null);
+    const [showAdminOverrideModal, setShowAdminOverrideModal] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(true); // In a real app, this would come from auth
+
     // Add these state variables for searchable dropdowns
     const [accountSearchQuery, setAccountSearchQuery] = useState('');
     const [ledgerHeadSearchQuery, setLedgerHeadSearchQuery] = useState('');
@@ -256,6 +261,18 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                         ledger_head_id: defaultCreditLedger ? defaultCreditLedger.id.toString() : '',
                         tx_date: new Date().toISOString().split('T')[0]
                     }));
+                }
+
+                // This should be added to the fetchFormData function, after loading accounts data
+                if (accountsData.length > 0) {
+                    // Get selected account details if account is selected
+                    if (formData.account_id) {
+                        const selectedAccount = accountsData.find(acc => acc.id === parseInt(formData.account_id));
+                        if (selectedAccount && selectedAccount.last_closed_date) {
+                            // Store the last closed date for date validation
+                            setSelectedAccount(selectedAccount);
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error fetching form data:', error);
@@ -669,6 +686,16 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
             }
         }
 
+        // Check if transaction date is in a closed period
+        if (formData.tx_date && selectedAccount && selectedAccount.last_closed_date) {
+            const txDate = new Date(formData.tx_date);
+            const closedDate = new Date(selectedAccount.last_closed_date);
+
+            if (txDate <= closedDate) {
+                newErrors.tx_date = `This date falls in a closed accounting period. Periods up to ${new Date(selectedAccount.last_closed_date).toLocaleDateString()} are locked.`;
+            }
+        }
+
         console.log('Form validation results:', { hasErrors: Object.keys(newErrors).length > 0, errors: newErrors });
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -698,49 +725,75 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Validate form
         if (!validateForm()) {
-            // Scroll to the first error
-            const firstErrorElement = document.querySelector('.error-message');
-            if (firstErrorElement) {
-                firstErrorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
             return;
         }
 
+        // Check for closed period that might need admin override
+        if (formData.tx_date && selectedAccount && selectedAccount.last_closed_date) {
+            const txDate = new Date(formData.tx_date);
+            const closedDate = new Date(selectedAccount.last_closed_date);
+
+            if (txDate <= closedDate && isAdmin) {
+                // Show admin override confirmation modal
+                setShowAdminOverrideModal(true);
+                return;
+            }
+        }
+
+        // Normal submission process continues
+        submitTransaction();
+    };
+
+    // Add a function to handle admin override confirmation
+    const handleAdminOverride = async () => {
+        setShowAdminOverrideModal(false);
+        // Add admin override flag to the form data
+        await submitTransaction(true);
+    };
+
+    // Modify the submitTransaction function to accept the override parameter
+    const submitTransaction = async (adminOverride = false) => {
+        setSubmitting(true);
+
         try {
-            setSubmitting(true);
-            console.log('Submitting form data:', formData);
+            let dataToSubmit = { ...formData };
+
+            if (adminOverride) {
+                dataToSubmit.admin_override = true;
+            }
+
+            console.log('Submitting form data:', dataToSubmit);
 
             // Add more detailed logging just before submitting data
             console.log('Submitting form data with cash_type:', {
-                cashType: formData.cash_type,
+                cashType: dataToSubmit.cash_type,
                 validValues: ['cash', 'bank', 'upi', 'card', 'netbank', 'cheque', 'multiple'],
-                isValid: ['cash', 'bank', 'upi', 'card', 'netbank', 'cheque', 'multiple'].includes(formData.cash_type)
+                isValid: ['cash', 'bank', 'upi', 'card', 'netbank', 'cheque', 'multiple'].includes(dataToSubmit.cash_type)
             });
 
             // Prepare data for API
             const submitData = {
-                account_id: parseInt(formData.account_id),
-                ledger_head_id: parseInt(formData.ledger_head_id),
-                donor_id: formData.donor_id ? parseInt(formData.donor_id) : null,
-                booklet_id: formData.booklet_id ? parseInt(formData.booklet_id) : null,
-                receipt_no: formData.receipt_no ? parseInt(formData.receipt_no) : null,
-                amount: parseFloat(formData.amount),
-                cash_type: formData.cash_type === 'both' ? 'multiple' : formData.cash_type, // Ensure 'both' is never sent to backend
-                tx_date: formData.tx_date,
-                description: formData.description
+                account_id: parseInt(dataToSubmit.account_id),
+                ledger_head_id: parseInt(dataToSubmit.ledger_head_id),
+                donor_id: dataToSubmit.donor_id ? parseInt(dataToSubmit.donor_id) : null,
+                booklet_id: dataToSubmit.booklet_id ? parseInt(dataToSubmit.booklet_id) : null,
+                receipt_no: dataToSubmit.receipt_no ? parseInt(dataToSubmit.receipt_no) : null,
+                amount: parseFloat(dataToSubmit.amount),
+                cash_type: dataToSubmit.cash_type === 'both' ? 'multiple' : dataToSubmit.cash_type, // Ensure 'both' is never sent to backend
+                tx_date: dataToSubmit.tx_date,
+                description: dataToSubmit.description
             };
 
             // Add cash_amount and bank_amount for multiple payment types
-            if (formData.cash_type === 'multiple') {
-                submitData.cash_amount = parseFloat(formData.cash_amount || 0);
-                submitData.bank_amount = parseFloat(formData.bank_amount || 0);
+            if (dataToSubmit.cash_type === 'multiple') {
+                submitData.cash_amount = parseFloat(dataToSubmit.cash_amount || 0);
+                submitData.bank_amount = parseFloat(dataToSubmit.bank_amount || 0);
             }
 
             // Add split transactions if present
-            if (formData.splits && formData.splits.length > 0) {
-                submitData.splits = formData.splits.map(split => ({
+            if (dataToSubmit.splits && dataToSubmit.splits.length > 0) {
+                submitData.splits = dataToSubmit.splits.map(split => ({
                     ledger_head_id: parseInt(split.ledger_head_id),
                     amount: parseFloat(split.amount)
                 }));
@@ -752,8 +805,8 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
 
             if (isEditing) {
                 // Update existing transaction
-                console.log(`Updating transaction ${formData.id}...`);
-                response = await api.put(`${API_CONFIG.API_PREFIX}/transactions/${formData.id}`, submitData);
+                console.log(`Updating transaction ${dataToSubmit.id}...`);
+                response = await api.put(`${API_CONFIG.API_PREFIX}/transactions/${dataToSubmit.id}`, submitData);
                 console.log('Update response:', response.data);
                 toast.success('Transaction updated successfully', {
                     position: "top-right",
@@ -970,6 +1023,22 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                 )}
             </div>
         );
+    };
+
+    // Update the account selection handler in the form component
+    const handleAccountChange = (accountId) => {
+        // Find the selected account object
+        const account = accounts.find(acc => acc.id === parseInt(accountId));
+        setSelectedAccount(account);
+
+        // Update form data
+        setFormData({
+            ...formData,
+            account_id: accountId
+        });
+
+        // Close the dropdown
+        setIsAccountDropdownOpen(false);
     };
 
     // Render form UI
@@ -1632,6 +1701,40 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                         </button>
                     </div>
                 </form>
+            )}
+
+            {selectedAccount && selectedAccount.last_closed_date && (
+                <p className="mt-1 text-xs text-amber-600">
+                    Note: Periods up to {new Date(selectedAccount.last_closed_date).toLocaleDateString()} are closed.
+                </p>
+            )}
+
+            {showAdminOverrideModal && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center">
+                    <div className="bg-white p-5 rounded-lg shadow-lg max-w-md w-full">
+                        <h3 className="text-lg font-medium text-red-600 mb-3">Admin Override Required</h3>
+                        <p className="text-gray-700 mb-4">
+                            You are creating a transaction dated {formData.tx_date}, which falls in a closed accounting period.
+                            This will require recalculation of monthly balances. Are you sure you want to proceed?
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md"
+                                onClick={() => setShowAdminOverrideModal(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md"
+                                onClick={handleAdminOverride}
+                            >
+                                Confirm Override
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

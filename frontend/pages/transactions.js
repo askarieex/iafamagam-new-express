@@ -60,95 +60,103 @@ export default function TransactionsPage() {
     if (activeTab === 'details') pageTitle = `Transaction Details ${selectedTransaction ? `#${selectedTransaction.id.substring(0, 8)}` : ''}`;
 
     return (
-        <div className="p-4 md:p-6 bg-gray-50 min-h-screen">
-            <div className="max-w-7xl mx-auto">
-                {/* Page Header */}
-                <div className="bg-white shadow-sm rounded-xl mb-6 overflow-hidden">
-                    <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100">
-                        <h1 className="text-2xl font-bold text-gray-800">
-                            {pageTitle}
-                        </h1>
+        <div className="w-full space-y-5 animate-fadeIn">
+            {/* Page Header */}
+            <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 dark:border-secondary-700">
+                    <h1 className="text-lg sm:text-xl font-semibold text-secondary-900 dark:text-white mb-2 sm:mb-0">
+                        {pageTitle}
+                    </h1>
 
-                        {activeTab === 'list' && (
-                            <div className="flex space-x-3">
-                                <button
-                                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-white flex items-center shadow-sm transition-all duration-150"
-                                    onClick={() => setActiveTab('credit')}
-                                >
-                                    <FaArrowDown className="mr-2 text-blue-200" />
-                                    <span>New Credit</span>
-                                </button>
-                                <button
-                                    className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-white flex items-center shadow-sm transition-all duration-150"
-                                    onClick={() => setActiveTab('debit')}
-                                >
-                                    <FaArrowUp className="mr-2 text-purple-200" />
-                                    <span>New Debit</span>
-                                </button>
-                            </div>
-                        )}
-
-                        {(activeTab === 'credit' || activeTab === 'debit' || activeTab === 'details' || activeTab === 'edit-credit' || activeTab === 'edit-debit') && (
-                            <button
-                                className="flex items-center px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 font-medium transition-all duration-150"
-                                onClick={handleBackToList}
-                            >
-                                <FaChevronLeft className="mr-2 text-gray-500" />
-                                <span>Back to List</span>
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Tab Content */}
-                <div className="transition-all duration-300 animate-fadeIn">
                     {activeTab === 'list' && (
-                        <TransactionsList
-                            onViewTransaction={handleViewTransaction}
-                            onEditTransaction={handleEditTransaction}
-                        />
+                        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                            <button
+                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-primary-600 hover:bg-primary-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
+                                onClick={() => setActiveTab('credit')}
+                            >
+                                <FaArrowDown className="mr-1.5 text-primary-200" />
+                                <span>New Credit</span>
+                            </button>
+                            <button
+                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-purple-600 hover:bg-purple-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
+                                onClick={() => setActiveTab('debit')}
+                            >
+                                <FaArrowUp className="mr-1.5 text-purple-200" />
+                                <span>New Debit</span>
+                            </button>
+                        </div>
                     )}
 
-                    {activeTab === 'credit' && (
+                    {(activeTab === 'credit' || activeTab === 'debit' || activeTab === 'details' || activeTab === 'edit-credit' || activeTab === 'edit-debit') && (
+                        <button
+                            className="flex items-center px-3 py-2 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-secondary-700 dark:hover:bg-secondary-600 rounded-lg text-secondary-700 dark:text-secondary-200 font-medium transition-all duration-150"
+                            onClick={handleBackToList}
+                        >
+                            <FaChevronLeft className="mr-1.5 text-secondary-500 dark:text-secondary-400" />
+                            <span>Back</span>
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Tab Content */}
+            <div className="transition-all duration-300">
+                {activeTab === 'list' && (
+                    <TransactionsList
+                        onViewTransaction={handleViewTransaction}
+                        onEditTransaction={handleEditTransaction}
+                    />
+                )}
+
+                {activeTab === 'credit' && (
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-6">
                         <CreditTransactionForm
                             onSuccess={handleTransactionSuccess}
                             onCancel={handleBackToList}
                         />
-                    )}
+                    </div>
+                )}
 
-                    {activeTab === 'debit' && (
+                {activeTab === 'debit' && (
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-6">
                         <DebitTransactionForm
                             onSuccess={handleTransactionSuccess}
                             onCancel={handleBackToList}
                         />
-                    )}
+                    </div>
+                )}
 
-                    {activeTab === 'edit-credit' && selectedTransaction && (
+                {activeTab === 'edit-credit' && selectedTransaction && (
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-6">
                         <CreditTransactionForm
                             transaction={selectedTransaction}
                             isEditing={true}
                             onSuccess={handleTransactionSuccess}
                             onCancel={handleBackToList}
                         />
-                    )}
+                    </div>
+                )}
 
-                    {activeTab === 'edit-debit' && selectedTransaction && (
+                {activeTab === 'edit-debit' && selectedTransaction && (
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-6">
                         <DebitTransactionForm
                             transaction={selectedTransaction}
                             isEditing={true}
                             onSuccess={handleTransactionSuccess}
                             onCancel={handleBackToList}
                         />
-                    )}
+                    </div>
+                )}
 
-                    {activeTab === 'details' && selectedTransaction && (
+                {activeTab === 'details' && selectedTransaction && (
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
                         <TransactionDetails
                             transactionId={selectedTransaction.id}
                             onBack={handleBackToList}
                             onEditTransaction={handleEditTransaction}
                         />
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
         </div>
     );

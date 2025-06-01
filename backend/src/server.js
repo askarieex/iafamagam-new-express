@@ -9,6 +9,7 @@ const donorRoutes = require('./routes/donorRoutes');
 const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
+const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 // Import Sequelize models
 const db = require('./models');
 
@@ -55,6 +56,7 @@ app.use('/api/donors', donorRoutes);
 app.use('/api/booklets', bookletRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/cheques', chequeRoutes);
+app.use('/api/monthly-closure', monthlyClosureRoutes);
 
 // 404 handler for undefined routes
 app.use((req, res) => {

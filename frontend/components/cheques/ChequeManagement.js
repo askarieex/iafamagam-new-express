@@ -3,28 +3,322 @@ import axios from 'axios';
 import {
     FaCheck,
     FaTimes,
-    FaSync,
     FaFilter,
     FaCalendarAlt,
     FaMoneyBillWave,
-    FaFileInvoiceDollar,
     FaInfoCircle,
-    FaWrench
+    FaSyncAlt,
+    FaFileInvoiceDollar
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
+
+// Inline styles for beautiful UI
+const styles = {
+    container: {
+        width: '100%',
+        maxWidth: '1400px',
+        margin: '0 auto',
+        padding: '1rem'
+    },
+    header: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: '1.25rem'
+    },
+    titleWrapper: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem'
+    },
+    icon: {
+        fontSize: '1.25rem',
+        color: '#4f46e5'
+    },
+    title: {
+        fontSize: '1.1rem',
+        fontWeight: 'bold',
+        margin: 0
+    },
+    actions: {
+        display: 'flex',
+        gap: '0.75rem'
+    },
+    buttonPrimary: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.5rem 1rem',
+        backgroundColor: '#4f46e5',
+        color: 'white',
+        border: 'none',
+        borderRadius: '0.375rem',
+        fontWeight: 600,
+        cursor: 'pointer'
+    },
+    buttonWarning: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.5rem 1rem',
+        backgroundColor: '#f59e0b',
+        color: 'white',
+        border: 'none',
+        borderRadius: '0.375rem',
+        fontWeight: 600,
+        cursor: 'pointer'
+    },
+    statsGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '1rem',
+        marginBottom: '1.25rem'
+    },
+    statCard: (color) => ({
+        backgroundColor: 'white',
+        borderRadius: '0.5rem',
+        padding: '1rem',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+        borderLeft: `4px solid ${color}`,
+        display: 'flex',
+        alignItems: 'center'
+    }),
+    iconBox: (bgColor) => ({
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '2.5rem',
+        height: '2.5rem',
+        borderRadius: '50%',
+        backgroundColor: bgColor,
+        marginRight: '0.75rem'
+    }),
+    statContent: {
+        flex: 1
+    },
+    statTitle: {
+        fontSize: '0.8rem',
+        fontWeight: 500,
+        color: '#64748b',
+        marginBottom: '0.25rem'
+    },
+    statValue: {
+        fontSize: '1.25rem',
+        fontWeight: 700,
+        color: '#1e293b',
+        marginBottom: '0.25rem'
+    },
+    statSubtitle: {
+        fontSize: '0.7rem',
+        color: '#64748b'
+    },
+    filtersSection: {
+        backgroundColor: 'white',
+        borderRadius: '0.5rem',
+        padding: '1rem',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+        marginBottom: '1.25rem'
+    },
+    filtersTitle: {
+        fontSize: '0.9rem',
+        fontWeight: 600,
+        marginBottom: '0.75rem'
+    },
+    filtersGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+        gap: '0.75rem',
+        marginBottom: '0.75rem'
+    },
+    formGroup: {
+        marginBottom: '0.75rem'
+    },
+    label: {
+        display: 'block',
+        fontSize: '0.75rem',
+        fontWeight: 500,
+        color: '#64748b',
+        marginBottom: '0.3rem'
+    },
+    select: {
+        display: 'block',
+        width: '100%',
+        padding: '0.4rem',
+        borderRadius: '0.375rem',
+        border: '1px solid #e2e8f0',
+        backgroundColor: 'white',
+        fontSize: '0.8rem'
+    },
+    inputWrapper: {
+        position: 'relative'
+    },
+    inputIcon: {
+        position: 'absolute',
+        left: '0.75rem',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        color: '#94a3b8',
+        pointerEvents: 'none'
+    },
+    input: {
+        display: 'block',
+        width: '100%',
+        padding: '0.4rem 0.6rem 0.4rem 2rem',
+        borderRadius: '0.375rem',
+        border: '1px solid #e2e8f0',
+        backgroundColor: 'white',
+        fontSize: '0.8rem'
+    },
+    buttonActions: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: '0.5rem',
+        marginTop: '0.75rem'
+    },
+    buttonSecondary: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.5rem 1rem',
+        backgroundColor: 'white',
+        color: '#64748b',
+        border: '1px solid #e2e8f0',
+        borderRadius: '0.375rem',
+        fontWeight: 500,
+        cursor: 'pointer'
+    },
+    tableContainer: {
+        backgroundColor: 'white',
+        borderRadius: '0.5rem',
+        overflow: 'hidden',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+    },
+    table: {
+        width: '100%',
+        borderCollapse: 'collapse'
+    },
+    tableHeader: {
+        backgroundColor: '#f8fafc',
+        textAlign: 'left',
+        padding: '0.6rem 0.75rem',
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        color: '#64748b',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        borderBottom: '1px solid #e2e8f0'
+    },
+    tableCell: {
+        padding: '0.6rem 0.75rem',
+        borderBottom: '1px solid #e2e8f0',
+        fontSize: '0.8rem',
+        color: '#334155'
+    },
+    loading: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '3rem 0'
+    },
+    spinner: {
+        borderWidth: '3px',
+        borderStyle: 'solid',
+        borderRadius: '50%',
+        borderColor: '#e2e8f0',
+        borderTopColor: '#4f46e5',
+        width: '2.5rem',
+        height: '2.5rem',
+        animation: 'spin 1s linear infinite',
+        marginBottom: '1rem'
+    },
+    emptyState: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '3rem 0'
+    },
+    emptyIcon: {
+        fontSize: '3rem',
+        color: '#94a3b8',
+        marginBottom: '1rem'
+    },
+    emptyTitle: {
+        fontSize: '1.25rem',
+        fontWeight: 600,
+        color: '#334155',
+        marginBottom: '0.5rem'
+    },
+    emptyText: {
+        color: '#64748b',
+        textAlign: 'center',
+        maxWidth: '24rem',
+        marginBottom: '1.5rem'
+    },
+    errorMessage: {
+        backgroundColor: '#fef2f2',
+        borderLeftWidth: '4px',
+        borderLeftColor: '#ef4444',
+        borderRadius: '0.375rem',
+        padding: '1rem',
+        marginBottom: '1.5rem'
+    },
+    statusBadge: (color, bgColor) => ({
+        display: 'inline-flex',
+        alignItems: 'center',
+        backgroundColor: bgColor,
+        color: color,
+        borderRadius: '9999px',
+        padding: '0.25rem 0.5rem',
+        fontSize: '0.75rem',
+        fontWeight: 500
+    }),
+    actionButton: (color, bgColor) => ({
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: bgColor,
+        color: color,
+        width: '1.75rem',
+        height: '1.75rem',
+        borderRadius: '9999px',
+        border: 'none',
+        cursor: 'pointer',
+        marginLeft: '0.375rem'
+    }),
+    helpBox: {
+        backgroundColor: '#fff7ed',
+        borderRadius: '0.375rem',
+        padding: '0.75rem',
+        borderLeft: '4px solid #f59e0b',
+        maxWidth: '24rem',
+        margin: '0 auto'
+    }
+};
 
 export default function ChequeManagement() {
     // State variables
     const [cheques, setCheques] = useState([]);
     const [accounts, setAccounts] = useState([]);
     const [ledgerHeads, setLedgerHeads] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [chequeCounts, setChequeCounts] = useState({
-        pending: 0,
-        cleared: 0,
-        cancelled: 0
+
+    // Statistics & counts
+    const [stats, setStats] = useState({
+        counts: {
+            pending: 0,
+            cleared: 0,
+            cancelled: 0,
+            total: 0
+        },
+        values: {
+            pending: 0,
+            cleared: 0,
+            cancelled: 0
+        }
     });
 
     // Filters
@@ -39,18 +333,32 @@ export default function ChequeManagement() {
     // Configure axios
     const api = axios.create({
         baseURL: API_CONFIG.BASE_URL,
-        timeout: 5000,
+        timeout: 8000, // Increased timeout
         headers: {
             'Content-Type': 'application/json'
         }
     });
 
-    // Fetch data on component mount
+    // Fetch data on component mount and when filters change
     useEffect(() => {
-        fetchCheques();
-        fetchAccounts();
-        fetchLedgerHeads();
+        fetchInitialData();
     }, []);
+
+    // Fetch all necessary data
+    const fetchInitialData = async () => {
+        try {
+            setLoading(true);
+            await Promise.all([
+                fetchAccounts(),
+                fetchLedgerHeads()
+            ]);
+            await fetchCheques(); // Fetch cheques after reference data is loaded
+        } catch (err) {
+            console.error('Error during initial data loading:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // Fetch cheques with filters
     const fetchCheques = async () => {
@@ -59,53 +367,41 @@ export default function ChequeManagement() {
             setError(null);
 
             // Construct query params from filters
-            let queryParams = new URLSearchParams();
+            const queryParams = new URLSearchParams();
             Object.entries(filters).forEach(([key, value]) => {
                 if (value) {
                     queryParams.append(key, value);
                 }
             });
 
-            console.log(`Fetching cheques with query: /api/cheques?${queryParams.toString()}`);
             const response = await api.get(`/api/cheques?${queryParams.toString()}`);
-            console.log('API response:', response.data);
 
             if (response.data.success) {
-                // Handle various response formats consistently
-                if (Array.isArray(response.data.data)) {
-                    setCheques(response.data.data);
-                    console.log(`Received ${response.data.data.length} cheques`);
-                } else if (response.data.data && Array.isArray(response.data.data.cheques)) {
-                    setCheques(response.data.data.cheques);
-                    console.log(`Received ${response.data.data.cheques.length} cheques`);
-                } else if (response.data.data) {
-                    // If data is not an array, try to convert it
-                    const chequeData = response.data.data;
-                    if (typeof chequeData === 'object' && !Array.isArray(chequeData)) {
-                        // If it's a single object, wrap it in an array
-                        setCheques([chequeData]);
-                    } else {
-                        console.error('Unexpected data format:', response.data.data);
-                        setError('Failed to fetch cheques: Data format is not as expected');
-                        setCheques([]);
-                    }
-                } else {
-                    // Set empty array if no data
-                    setCheques([]);
-                }
+                // Handle cheque data
+                const chequeData = response.data.data || [];
+                setCheques(Array.isArray(chequeData) ? chequeData : []);
 
-                // Set the cheque counts
-                if (response.data.counts) {
-                    setChequeCounts(response.data.counts);
-                }
+                // Update statistics
+                setStats({
+                    counts: response.data.counts || {
+                        pending: 0,
+                        cleared: 0,
+                        cancelled: 0,
+                        total: 0
+                    },
+                    values: {
+                        pending: response.data.totalPendingValue || 0,
+                        cleared: response.data.totalClearedValue || 0,
+                        cancelled: response.data.totalCancelledValue || 0
+                    }
+                });
             } else {
-                console.error('API response not successful:', response.data);
-                setError(`Failed to fetch cheques: ${response.data.message || 'Unknown error'}`);
                 setCheques([]);
+                setError(response.data.message || 'Failed to fetch cheques');
             }
         } catch (err) {
             console.error('Error fetching cheques:', err);
-            setError(`Failed to fetch cheques: ${err.response?.data?.message || err.message}`);
+            setError(err.response?.data?.message || err.message || 'Error connecting to server');
             setCheques([]);
         } finally {
             setLoading(false);
@@ -161,7 +457,6 @@ export default function ChequeManagement() {
             from_date: '',
             to_date: ''
         });
-        // Fetch data with reset filters
         setTimeout(() => fetchCheques(), 0);
     };
 
@@ -173,20 +468,17 @@ export default function ChequeManagement() {
 
         try {
             setLoading(true);
-            setError(null);
-
             const response = await api.post('/api/cheques/fix-missing');
 
             if (response.data.success) {
-                toast.success(`${response.data.message || 'Missing cheque records fixed successfully'}`);
-                fetchCheques(); // Refresh the list
+                toast.success(response.data.message || 'Missing cheque records fixed successfully');
+                fetchCheques();
             } else {
-                toast.error(`Failed to fix missing cheque records: ${response.data.message || 'Unknown error'}`);
+                toast.error(response.data.message || 'Failed to fix missing cheque records');
             }
         } catch (err) {
             console.error('Error fixing missing cheque records:', err);
-            toast.error(`Failed to fix missing cheque records: ${err.response?.data?.message || err.message}`);
-            setError(`Failed to fix missing cheque records: ${err.response?.data?.message || err.message}`);
+            toast.error(err.response?.data?.message || err.message || 'Failed to fix missing cheque records');
         } finally {
             setLoading(false);
         }
@@ -208,11 +500,11 @@ export default function ChequeManagement() {
                 toast.success('Cheque cleared successfully');
                 fetchCheques(); // Refresh the list
             } else {
-                toast.error(`Failed to clear cheque: ${response.data.message || 'Unknown error'}`);
+                toast.error(response.data.message || 'Failed to clear cheque');
             }
         } catch (err) {
             console.error('Error clearing cheque:', err);
-            toast.error(`Error clearing cheque: ${err.response?.data?.message || err.message}`);
+            toast.error(err.response?.data?.message || err.message || 'Failed to clear cheque');
         } finally {
             setLoading(false);
         }
@@ -231,11 +523,11 @@ export default function ChequeManagement() {
                 toast.success('Cheque cancelled successfully');
                 fetchCheques(); // Refresh the list
             } else {
-                toast.error(`Failed to cancel cheque: ${response.data.message || 'Unknown error'}`);
+                toast.error(response.data.message || 'Failed to cancel cheque');
             }
         } catch (err) {
             console.error('Error cancelling cheque:', err);
-            toast.error(`Error cancelling cheque: ${err.response?.data?.message || err.message}`);
+            toast.error(err.response?.data?.message || err.message || 'Failed to cancel cheque');
         } finally {
             setLoading(false);
         }
@@ -261,317 +553,308 @@ export default function ChequeManagement() {
                 year: 'numeric'
             });
         } catch (err) {
-            console.error('Error formatting date:', err);
-            return dateString;
+            return 'Invalid Date';
         }
-    };
-
-    // Render status badge
-    const renderStatusBadge = (status) => {
-        let color, icon;
-
-        switch (status) {
-            case 'pending':
-                color = 'bg-yellow-100 text-yellow-800';
-                icon = <FaMoneyBillWave className="mr-1" />;
-                break;
-            case 'cleared':
-                color = 'bg-green-100 text-green-800';
-                icon = <FaCheck className="mr-1" />;
-                break;
-            case 'cancelled':
-                color = 'bg-red-100 text-red-800';
-                icon = <FaTimes className="mr-1" />;
-                break;
-            default:
-                color = 'bg-gray-100 text-gray-800';
-                icon = null;
-        }
-
-        return (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${color}`}>
-                {icon}
-                {status.charAt(0).toUpperCase() + status.slice(1)}
-            </span>
-        );
     };
 
     return (
-        <div className="cheque-management-page p-6">
-            <div className="content-wrapper bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-                <div className="page-header flex justify-between items-center mb-6">
-                    <h1 className="text-2xl font-bold text-gray-800 flex items-center">
-                        <FaMoneyBillWave className="mr-3 text-indigo-600" />
-                        Cheque Management
-                    </h1>
+        <div style={styles.container}>
+            {/* Header */}
+            <div style={styles.header}>
+                <div style={styles.titleWrapper}>
+                    <FaFileInvoiceDollar style={styles.icon} />
+                    <h2 style={styles.title}>Cheque Management</h2>
+                </div>
 
+                <div style={styles.actions}>
                     <button
-                        onClick={handleFixMissingCheques}
-                        className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        style={styles.buttonPrimary}
+                        onClick={fetchCheques}
+                        disabled={loading}
                     >
-                        <FaWrench className="mr-2 -ml-1 h-4 w-4" />
-                        Fix Missing Cheques
+                        <FaSyncAlt className={loading ? "spinning" : ""} />
+                        <span>Refresh</span>
                     </button>
                 </div>
+            </div>
 
-                {error && (
-                    <div className="error-message bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-md">
-                        <div className="flex">
-                            <div className="flex-shrink-0">
-                                <FaTimes className="h-5 w-5 text-red-500" />
-                            </div>
-                            <div className="ml-3">
-                                <p className="text-sm text-red-700">{error}</p>
-                            </div>
+            {/* Statistics Cards */}
+            <div style={styles.statsGrid}>
+                <div style={styles.statCard('#facc15')}>
+                    <div style={styles.iconBox('#fef9c3')}>
+                        <FaMoneyBillWave style={{ color: '#ca8a04', fontSize: '1.25rem' }} />
+                    </div>
+                    <div style={styles.statContent}>
+                        <p style={styles.statTitle}>Pending Cheques</p>
+                        <p style={styles.statValue}>{stats.counts.pending || 0}</p>
+                        <p style={styles.statSubtitle}>Total: {formatCurrency(stats.values.pending)}</p>
+                    </div>
+                </div>
+
+                <div style={styles.statCard('#10b981')}>
+                    <div style={styles.iconBox('#d1fae5')}>
+                        <FaCheck style={{ color: '#059669', fontSize: '1.25rem' }} />
+                    </div>
+                    <div style={styles.statContent}>
+                        <p style={styles.statTitle}>Cleared Cheques</p>
+                        <p style={styles.statValue}>{stats.counts.cleared || 0}</p>
+                        <p style={styles.statSubtitle}>Total: {formatCurrency(stats.values.cleared)}</p>
+                    </div>
+                </div>
+
+                <div style={styles.statCard('#ef4444')}>
+                    <div style={styles.iconBox('#fee2e2')}>
+                        <FaTimes style={{ color: '#dc2626', fontSize: '1.25rem' }} />
+                    </div>
+                    <div style={styles.statContent}>
+                        <p style={styles.statTitle}>Cancelled Cheques</p>
+                        <p style={styles.statValue}>{stats.counts.cancelled || 0}</p>
+                        <p style={styles.statSubtitle}>Total: {formatCurrency(stats.values.cancelled)}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Error Display */}
+            {error && (
+                <div style={styles.errorMessage}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                        <FaTimes style={{ color: '#ef4444', marginRight: '0.75rem', marginTop: '0.25rem' }} />
+                        <p style={{ margin: 0, color: '#b91c1c' }}>{error}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Filters Section */}
+            <div style={styles.filtersSection}>
+                <h3 style={styles.filtersTitle}>Filter Cheques</h3>
+                <div style={styles.filtersGrid}>
+                    <div style={styles.formGroup}>
+                        <label htmlFor="status" style={styles.label}>Status</label>
+                        <select
+                            id="status"
+                            name="status"
+                            value={filters.status}
+                            onChange={handleFilterChange}
+                            style={styles.select}
+                            disabled={loading}
+                        >
+                            <option value="">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="cleared">Cleared</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+
+                    <div style={styles.formGroup}>
+                        <label htmlFor="account_id" style={styles.label}>Account</label>
+                        <select
+                            id="account_id"
+                            name="account_id"
+                            value={filters.account_id}
+                            onChange={handleFilterChange}
+                            style={styles.select}
+                            disabled={loading}
+                        >
+                            <option value="">All Accounts</option>
+                            {accounts.map(account => (
+                                <option key={account.id} value={account.id}>{account.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div style={styles.formGroup}>
+                        <label htmlFor="from_date" style={styles.label}>From Date</label>
+                        <div style={styles.inputWrapper}>
+                            <FaCalendarAlt style={styles.inputIcon} />
+                            <input
+                                type="date"
+                                id="from_date"
+                                name="from_date"
+                                value={filters.from_date}
+                                onChange={handleFilterChange}
+                                style={styles.input}
+                                disabled={loading}
+                            />
                         </div>
                     </div>
-                )}
 
-                <div className="filters-section bg-gray-50 p-4 rounded-lg mb-6">
-                    <div className="flex flex-wrap items-end gap-4">
-                        <div className="filter-group">
-                            <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
-                                Status
-                            </label>
-                            <select
-                                id="status"
-                                name="status"
-                                value={filters.status}
+                    <div style={styles.formGroup}>
+                        <label htmlFor="to_date" style={styles.label}>To Date</label>
+                        <div style={styles.inputWrapper}>
+                            <FaCalendarAlt style={styles.inputIcon} />
+                            <input
+                                type="date"
+                                id="to_date"
+                                name="to_date"
+                                value={filters.to_date}
                                 onChange={handleFilterChange}
-                                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                            >
-                                <option value="">All</option>
-                                <option value="pending">Pending ({chequeCounts.pending})</option>
-                                <option value="cleared">Cleared ({chequeCounts.cleared})</option>
-                                <option value="cancelled">Cancelled ({chequeCounts.cancelled})</option>
-                            </select>
-                        </div>
-
-                        <div className="filter-group">
-                            <label htmlFor="account_id" className="block text-sm font-medium text-gray-700 mb-1">
-                                Account
-                            </label>
-                            <select
-                                id="account_id"
-                                name="account_id"
-                                value={filters.account_id}
-                                onChange={handleFilterChange}
-                                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                            >
-                                <option value="">All Accounts</option>
-                                {accounts.map(account => (
-                                    <option key={account.id} value={account.id}>
-                                        {account.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="filter-group">
-                            <label htmlFor="ledger_head_id" className="block text-sm font-medium text-gray-700 mb-1">
-                                Ledger Head
-                            </label>
-                            <select
-                                id="ledger_head_id"
-                                name="ledger_head_id"
-                                value={filters.ledger_head_id}
-                                onChange={handleFilterChange}
-                                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                            >
-                                <option value="">All Ledger Heads</option>
-                                {ledgerHeads.map(head => (
-                                    <option key={head.id} value={head.id}>
-                                        {head.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="filter-group">
-                            <label htmlFor="from_date" className="block text-sm font-medium text-gray-700 mb-1">
-                                From Date
-                            </label>
-                            <div className="relative">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <FaCalendarAlt className="h-4 w-4 text-gray-400" />
-                                </div>
-                                <input
-                                    type="date"
-                                    id="from_date"
-                                    name="from_date"
-                                    value={filters.from_date}
-                                    onChange={handleFilterChange}
-                                    className="block w-full pl-10 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="filter-group">
-                            <label htmlFor="to_date" className="block text-sm font-medium text-gray-700 mb-1">
-                                To Date
-                            </label>
-                            <div className="relative">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <FaCalendarAlt className="h-4 w-4 text-gray-400" />
-                                </div>
-                                <input
-                                    type="date"
-                                    id="to_date"
-                                    name="to_date"
-                                    value={filters.to_date}
-                                    onChange={handleFilterChange}
-                                    className="block w-full pl-10 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex space-x-3">
-                            <button
-                                onClick={resetFilters}
-                                className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 h-10"
-                            >
-                                <FaTimes className="mr-2 -ml-1 h-4 w-4" />
-                                Reset
-                            </button>
-                            <button
-                                onClick={applyFilters}
-                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 h-10"
-                            >
-                                <FaFilter className="mr-2 -ml-1 h-4 w-4" />
-                                Apply Filters
-                            </button>
+                                style={styles.input}
+                                disabled={loading}
+                            />
                         </div>
                     </div>
                 </div>
 
+                <div style={styles.buttonActions}>
+                    <button
+                        onClick={resetFilters}
+                        style={styles.buttonSecondary}
+                        disabled={loading}
+                    >
+                        <FaTimes />
+                        <span>Reset</span>
+                    </button>
+                    <button
+                        onClick={applyFilters}
+                        style={styles.buttonPrimary}
+                        disabled={loading}
+                    >
+                        <FaFilter />
+                        <span>Apply Filters</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Cheques List */}
+            <div style={styles.tableContainer}>
                 {loading ? (
-                    <div className="loading text-center py-8">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto"></div>
-                        <p className="mt-3 text-gray-600">Loading cheques...</p>
+                    <div style={styles.loading}>
+                        <div style={styles.spinner}></div>
+                        <p style={{ color: '#64748b', margin: 0 }}>Loading cheques...</p>
                     </div>
-                ) : (
-                    <div className="cheque-list">
-                        {cheques.length === 0 ? (
-                            <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-                                <FaFileInvoiceDollar className="mx-auto h-12 w-12 text-gray-400" />
-                                <h3 className="mt-2 text-sm font-medium text-gray-900">No cheques found</h3>
-                                <p className="mt-1 text-sm text-gray-500">
-                                    No cheques match your current filter criteria.
-                                </p>
-                                {filters.status === 'pending' && (
-                                    <div className="mt-4 bg-yellow-50 p-4 rounded-md max-w-md mx-auto">
-                                        <div className="flex">
-                                            <div className="flex-shrink-0">
-                                                <FaInfoCircle className="h-5 w-5 text-yellow-400" />
-                                            </div>
-                                            <div className="ml-3">
-                                                <p className="text-sm text-yellow-700">
-                                                    If you expected to see pending cheques, please check:
-                                                    <ul className="list-disc pl-5 mt-1 space-y-1">
-                                                        <li>You have created transactions with payment method "Cheque"</li>
-                                                        <li>The transactions have status "pending"</li>
-                                                        <li>Try clicking the <strong>"Fix Missing Cheques"</strong> button above to create cheque records for any pending cheque transactions</li>
-                                                    </ul>
-                                                </p>
-                                            </div>
-                                        </div>
+                ) : cheques.length === 0 ? (
+                    <div style={styles.emptyState}>
+                        <FaFileInvoiceDollar style={styles.emptyIcon} />
+                        <h3 style={styles.emptyTitle}>No cheques found</h3>
+                        <p style={styles.emptyText}>No cheques match your current filter criteria.</p>
+
+                        {filters.status === 'pending' && (
+                            <div style={styles.helpBox}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                    <FaInfoCircle style={{ color: '#f59e0b', marginRight: '0.75rem', marginTop: '0.25rem' }} />
+                                    <div>
+                                        <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#92400e' }}>If you expected to see pending cheques, please check:</p>
+                                        <ul style={{ margin: '0', paddingLeft: '1.25rem', color: '#92400e' }}>
+                                            <li>You have created transactions with payment method "Cheque"</li>
+                                            <li>The transactions have status "pending"</li>
+                                            <li>Try clicking the <strong>"Fix Missing Cheques"</strong> button</li>
+                                        </ul>
                                     </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="overflow-x-auto rounded-lg border border-gray-200">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50 sticky top-0">
-                                        <tr>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Cheque #
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Bank
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Account / Ledger Head
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Amount
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Issue Date
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Due Date
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Status
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Actions
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {cheques.map((cheque, index) => (
-                                            <tr key={cheque.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    {cheque.cheque_number || 'No Number'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {cheque.bank_name || 'Not Specified'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <div className="font-medium">{cheque.account?.name || 'Unknown Account'}</div>
-                                                    <div className="text-xs text-gray-400">{cheque.ledgerHead?.name || cheque.ledger_head?.name || 'Unknown Ledger'}</div>
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {formatCurrency(cheque.amount || cheque.transaction?.amount || 0)}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {formatDate(cheque.issue_date)}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {formatDate(cheque.due_date)}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {renderStatusBadge(cheque.status || 'unknown')}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                    {cheque.status === 'pending' && (
-                                                        <div className="flex justify-end space-x-2">
-                                                            <button
-                                                                onClick={() => handleClearCheque(cheque.id)}
-                                                                className="text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100 p-1.5 rounded-md transition-colors"
-                                                                title="Mark as Cleared"
-                                                                disabled={!cheque.id}
-                                                            >
-                                                                <FaCheck className="h-4 w-4" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCancelCheque(cheque.id)}
-                                                                className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-1.5 rounded-md transition-colors"
-                                                                title="Cancel Cheque"
-                                                                disabled={!cheque.id}
-                                                            >
-                                                                <FaTimes className="h-4 w-4" />
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                    {cheque.status !== 'pending' && (
-                                                        <span className="text-gray-400">
-                                                            {cheque.status === 'cleared' && cheque.clearing_date && `Cleared on ${formatDate(cheque.clearing_date)}`}
-                                                            {cheque.status === 'cancelled' && (cheque.cancel_reason ? `Cancelled: ${cheque.cancel_reason}` : 'Cancelled')}
-                                                            {!['cleared', 'cancelled'].includes(cheque.status) && 'No actions available'}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                </div>
                             </div>
                         )}
                     </div>
+                ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={styles.table}>
+                            <thead>
+                                <tr>
+                                    <th style={styles.tableHeader}>Cheque #</th>
+                                    <th style={styles.tableHeader}>Bank</th>
+                                    <th style={styles.tableHeader}>Account / Ledger Head</th>
+                                    <th style={styles.tableHeader}>Amount</th>
+                                    <th style={styles.tableHeader}>Issue Date</th>
+                                    <th style={styles.tableHeader}>Due Date</th>
+                                    <th style={styles.tableHeader}>Status</th>
+                                    <th style={{ ...styles.tableHeader, textAlign: 'right' }}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {cheques.map((cheque) => {
+                                    // Safely extract transaction data
+                                    const amount = cheque.transaction?.amount || 0;
+                                    const accountName = cheque.account?.name || 'Unknown Account';
+                                    const ledgerHeadName = cheque.ledgerHead?.name || cheque.transaction?.ledgerHead?.name || 'Unknown Ledger';
+                                    const chequeNumber = cheque.cheque_number || cheque.transaction?.cheque_number || 'No Number';
+                                    const bankName = cheque.bank_name || cheque.transaction?.bank_name || 'Not Specified';
+
+                                    // Status badge configuration
+                                    let statusBadge;
+                                    switch (cheque.status) {
+                                        case 'pending':
+                                            statusBadge = styles.statusBadge('#ca8a04', '#fef9c3');
+                                            break;
+                                        case 'cleared':
+                                            statusBadge = styles.statusBadge('#059669', '#d1fae5');
+                                            break;
+                                        case 'cancelled':
+                                            statusBadge = styles.statusBadge('#dc2626', '#fee2e2');
+                                            break;
+                                        default:
+                                            statusBadge = styles.statusBadge('#64748b', '#f1f5f9');
+                                    }
+
+                                    return (
+                                        <tr key={cheque.id}>
+                                            <td style={{ ...styles.tableCell, fontWeight: 500 }}>{chequeNumber}</td>
+                                            <td style={styles.tableCell}>{bankName}</td>
+                                            <td style={styles.tableCell}>
+                                                <div style={{ fontWeight: 500 }}>{accountName}</div>
+                                                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ledgerHeadName}</div>
+                                            </td>
+                                            <td style={{ ...styles.tableCell, fontWeight: 500 }}>{formatCurrency(amount)}</td>
+                                            <td style={styles.tableCell}>{formatDate(cheque.issue_date || cheque.transaction?.issue_date)}</td>
+                                            <td style={styles.tableCell}>{formatDate(cheque.due_date || cheque.transaction?.due_date)}</td>
+                                            <td style={styles.tableCell}>
+                                                <span style={statusBadge}>
+                                                    {cheque.status === 'pending' && <FaMoneyBillWave style={{ marginRight: '0.25rem' }} />}
+                                                    {cheque.status === 'cleared' && <FaCheck style={{ marginRight: '0.25rem' }} />}
+                                                    {cheque.status === 'cancelled' && <FaTimes style={{ marginRight: '0.25rem' }} />}
+                                                    {cheque.status.charAt(0).toUpperCase() + cheque.status.slice(1)}
+                                                </span>
+                                            </td>
+                                            <td style={{ ...styles.tableCell, textAlign: 'right' }}>
+                                                {cheque.status === 'pending' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleClearCheque(cheque.id)}
+                                                            style={styles.actionButton('#059669', '#d1fae5')}
+                                                            title="Mark as Cleared"
+                                                            disabled={loading}
+                                                        >
+                                                            <FaCheck />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCancelCheque(cheque.id)}
+                                                            style={styles.actionButton('#dc2626', '#fee2e2')}
+                                                            title="Cancel Cheque"
+                                                            disabled={loading}
+                                                        >
+                                                            <FaTimes />
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {cheque.status === 'cleared' && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                                        {cheque.clearing_date ? `Cleared on ${formatDate(cheque.clearing_date)}` : 'Cleared'}
+                                                    </span>
+                                                )}
+                                                {cheque.status === 'cancelled' && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                                        Cancelled
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
+
+            {/* CSS for animations */}
+            <style jsx>{`
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .spinning {
+                    animation: spin 1s linear infinite;
+                }
+            `}</style>
         </div>
     );
-} 
+}
+

@@ -2,6 +2,8 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/": "pages/index.js",
-  "/transactions": "pages/transactions.js"
+  "/manage-ledger": "pages/manage-ledger.js",
+  "/transactions": "pages/transactions.js",
+  "/ledger-snapshots": "pages/ledger-snapshots.js",
+  "/period-closure": "pages/period-closure.js"
 }

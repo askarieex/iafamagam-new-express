@@ -89,7 +89,8 @@ class ChequeService {
                         as: 'transaction',
                         where: null, // Remove conditions from the JOIN
                         required: false, // Use left join to make debugging easier
-                        attributes: ['id', 'amount', 'tx_date', 'tx_type', 'cash_type', 'description', 'status']
+                        attributes: ['id', 'amount', 'tx_date', 'tx_type', 'cash_type', 'description', 'status',
+                            'cheque_number', 'bank_name', 'issue_date', 'due_date'] // Include these fields
                     },
                     {
                         model: db.Account,
@@ -629,17 +630,37 @@ class ChequeService {
                     const txDate = tx.tx_date ? new Date(tx.tx_date) : new Date();
                     const dateStr = txDate.toISOString().split('T')[0].replace(/-/g, '');
 
-                    // Generate a better cheque number using transaction date and a portion of the ID
-                    // Format: TXN-YYYYMMDD-{last 4 digits of tx ID}
-                    const txIdSuffix = tx.id.substring(tx.id.length - 4);
-                    const chequeNumber = `TXN-${dateStr}-${txIdSuffix}`;
+                    // Check if transaction has original cheque_number and bank_name
+                    // These would be set during transaction creation if user provided them
+                    let chequeNumber = tx.cheque_number;
+                    let bankName = tx.bank_name;
 
-                    // Create a more meaningful bank name using account information if available
-                    let bankName = 'Unknown Bank';
-                    if (tx.account && tx.account.name) {
-                        bankName = `${tx.account.name} Bank Account`;
-                    } else if (tx.ledgerHead && tx.ledgerHead.name) {
-                        bankName = `${tx.ledgerHead.name} Bank`;
+                    // Only generate placeholders if no original values exist
+                    if (!chequeNumber || chequeNumber.startsWith('AUTO-')) {
+                        // Generate a better cheque number using transaction date and a portion of the ID
+                        // Format: TXN-YYYYMMDD-{last 4 digits of tx ID}
+                        const txIdSuffix = tx.id.substring(tx.id.length - 4);
+                        chequeNumber = `TXN-${dateStr}-${txIdSuffix}`;
+                    }
+
+                    if (!bankName || bankName === 'Auto-generated') {
+                        // Create a more meaningful bank name using account information if available
+                        if (tx.account && tx.account.name) {
+                            bankName = `${tx.account.name} Bank Account`;
+                        } else if (tx.ledgerHead && tx.ledgerHead.name) {
+                            bankName = `${tx.ledgerHead.name} Bank`;
+                        } else {
+                            bankName = 'Unknown Bank';
+                        }
+                    }
+
+                    // Use transaction's issue_date and due_date if available
+                    const issueDate = tx.issue_date || txDate;
+                    let dueDate = tx.due_date;
+
+                    // If no due date is set, default to 30 days after issue date
+                    if (!dueDate) {
+                        dueDate = new Date(new Date(issueDate).getTime() + 30 * 24 * 60 * 60 * 1000);
                     }
 
                     // Create the cheque record
@@ -650,11 +671,10 @@ class ChequeService {
                             ledger_head_id: ledgerHeadId,
                             cheque_number: chequeNumber,
                             bank_name: bankName,
-                            issue_date: tx.tx_date || new Date(),
-                            // Set due date to 30 days after issue date by default
-                            due_date: new Date(new Date(tx.tx_date || new Date()).getTime() + 30 * 24 * 60 * 60 * 1000),
+                            issue_date: issueDate,
+                            due_date: dueDate,
                             status: 'pending',
-                            description: `Auto-generated for transaction ${tx.voucher_number || tx.id}: ${tx.description || ''}`
+                            description: tx.description || `Auto-generated for transaction ${tx.voucher_number || tx.id}`
                         }, { transaction: t });
 
                         createdCheques.push(cheque);
