@@ -2,7 +2,10 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/booklets": "pages/booklets.js",
-  "/ledger-snapshots": "pages/ledger-snapshots.js",
-  "/cheque-management": "pages/cheque-management.js"
+  "/auth/login": "pages/auth/login.js",
+  "/dashboard": "pages/dashboard.js",
+  "/admin": "pages/admin.js",
+  "/auth/reset-password": "pages/auth/reset-password.js",
+  "/auth/debug-tools": "pages/auth/debug-tools.js",
+  "/auth/register": "pages/auth/register.js"
 }

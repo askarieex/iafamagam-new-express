@@ -1,29 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const transactionController = require('../controllers/transactionController');
+const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/authMiddleware');
 
-// Create a credit transaction
-router.post('/credit', transactionController.createCredit);
+// Public routes - none
 
-// Create a debit transaction
-router.post('/debit', transactionController.createDebit);
+// Protected routes for all authenticated users
+// Create transactions
+router.post('/credit', protect, transactionController.createCredit);
+router.post('/debit', protect, transactionController.createDebit);
 
-// Get balances for a specific date (for debit transaction form)
-router.get('/balances/date', transactionController.getBalancesForDate);
+// Get data
+router.get('/balances/date', protect, transactionController.getBalancesForDate);
+router.get('/', protect, transactionController.getTransactions);
+router.get('/:id', protect, transactionController.getTransactionById);
 
-// Get all transactions with pagination and filtering
-router.get('/', transactionController.getTransactions);
-
-// Get transaction by ID
-router.get('/:id', transactionController.getTransactionById);
-
-// Update a transaction
-router.put('/:id', transactionController.updateTransaction);
-
-// Void (delete) a transaction
-router.delete('/:id', transactionController.voidTransaction);
-
-// Get balances for a specific date (for debit transaction form)
-router.get('/balances/date', transactionController.getBalancesForDate);
+// Admin-only routes for sensitive operations
+router.put('/:id', protect, authorize('admin'), transactionController.updateTransaction);
+router.delete('/:id', protect, authorize('admin'), transactionController.voidTransaction);
 
 module.exports = router; 

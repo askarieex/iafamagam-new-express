@@ -2,6 +2,8 @@ const express = require('express');
 const cron = require('node-cron');
 const runMonthEndClosure = require('./jobs/monthEndClosure');
 const autoClosePreviousMonth = require('./jobs/autoClosePreviousMonth');
+const cookieParser = require('cookie-parser');
+const seedAdminUser = require('./seeders/adminUserSeeder');
 
 // Import routes
 const accountRoutes = require('./routes/accountRoutes');
@@ -13,6 +15,8 @@ const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
 const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
 // Import Sequelize models
 const db = require('./models');
 const monthlyClosureService = require('./services/monthlyClosureService');
@@ -26,15 +30,17 @@ const PORT = process.env.PORT || 3002;
 
 // CORS configuration
 const corsOptions = {
-    origin: '*', // In production, replace with specific origins
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'], // Add your frontend URLs
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true // Allow cookies to be sent with requests
 };
 
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -52,6 +58,9 @@ app.get('/', (req, res) => {
 });
 
 // Mount routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes); // Public user routes for debugging
+app.use('/api/admin/users', userRoutes); // Admin-only user routes
 app.use('/api/accounts', accountRoutes);
 app.use('/api/bank-accounts', bankAccountRoutes);
 app.use('/api/ledger-heads', ledgerHeadRoutes);
@@ -107,8 +116,12 @@ console.log('Auto-close previous month scheduled for 1:00 AM on the 1st day of e
 
 // Sync database and start server without dropping tables
 db.sequelize.sync()
-    .then(() => {
+    .then(async () => {
         console.log('Database connected successfully');
+
+        // Seed the default admin user
+        await seedAdminUser();
+
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);
         });

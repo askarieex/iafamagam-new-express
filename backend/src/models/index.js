@@ -31,16 +31,7 @@ fs
         );
     })
     .forEach(file => {
-        const modelModule = require(path.join(__dirname, file));
-        let model;
-
-        // Handle both function-style and direct model exports
-        if (typeof modelModule === 'function') {
-            model = modelModule(sequelize);
-        } else {
-            model = modelModule;
-        }
-
+        const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);
         db[model.name] = model;
     });
 

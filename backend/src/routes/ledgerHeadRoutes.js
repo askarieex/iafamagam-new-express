@@ -1,20 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const ledgerHeadController = require('../controllers/ledgerHeadController');
+const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/authMiddleware');
 
-// GET all ledger heads (with optional filtering by account_id)
-router.get('/', ledgerHeadController.getAllLedgerHeads);
+// Protected routes for all authenticated users - read operations
+router.get('/', protect, ledgerHeadController.getAllLedgerHeads);
+router.get('/:id', protect, ledgerHeadController.getLedgerHeadById);
 
-// GET single ledger head by ID
-router.get('/:id', ledgerHeadController.getLedgerHeadById);
-
-// POST create new ledger head
-router.post('/', ledgerHeadController.createLedgerHead);
-
-// PATCH update existing ledger head
-router.patch('/:id', ledgerHeadController.updateLedgerHead);
-
-// DELETE ledger head
-router.delete('/:id', ledgerHeadController.deleteLedgerHead);
+// Admin-only routes - write operations
+router.post('/', protect, authorize('admin'), ledgerHeadController.createLedgerHead);
+router.patch('/:id', protect, authorize('admin'), ledgerHeadController.updateLedgerHead);
+router.delete('/:id', protect, authorize('admin'), ledgerHeadController.deleteLedgerHead);
 
 module.exports = router; 

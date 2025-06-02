@@ -22,15 +22,35 @@
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/cheque-management": [
+    "/admin": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/cheque-management.js"
+      "static/chunks/pages/admin.js"
     ],
-    "/ledger-snapshots": [
+    "/auth/debug-tools": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/ledger-snapshots.js"
+      "static/chunks/pages/auth/debug-tools.js"
+    ],
+    "/auth/login": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/auth/login.js"
+    ],
+    "/auth/register": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/auth/register.js"
+    ],
+    "/auth/reset-password": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/auth/reset-password.js"
+    ],
+    "/dashboard": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/dashboard.js"
     ]
   },
   "ampFirstPages": []
