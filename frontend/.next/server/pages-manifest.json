@@ -3,9 +3,8 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/auth/login": "pages/auth/login.js",
-  "/dashboard": "pages/dashboard.js",
   "/admin": "pages/admin.js",
-  "/auth/reset-password": "pages/auth/reset-password.js",
+  "/dashboard": "pages/dashboard.js",
   "/auth/debug-tools": "pages/auth/debug-tools.js",
   "/auth/register": "pages/auth/register.js"
 }
