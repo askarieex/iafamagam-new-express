@@ -295,19 +295,27 @@ class MonthlyClosureService {
                         }
                     }
 
-                    // Update account's last_closed_date
-                    await account.update({
-                        last_closed_date: periodEndDate
-                    }, { transaction: t });
-
-                    results.accountsProcessed++;
+                    // Prepare for next month by creating opening balance record
+                    results.nextMonthPrepared++;
                 }
 
-                return {
-                    success: true,
-                    message: `Successfully closed period ${month}/${year}`,
-                    results
-                };
+                // Update account's last closed date
+                for (const account of accounts) {
+                    try {
+                        // Try to update last_closed_date
+                        await account.update({
+                            last_closed_date: periodEndDate
+                        }, { transaction: t });
+                        console.log(`Updated account ${account.id} last_closed_date to ${periodEndDate}`);
+                    } catch (updateError) {
+                        // If column doesn't exist, log the error but continue
+                        console.warn(`Could not update last_closed_date for account ${account.id}: ${updateError.message}`);
+                        console.warn('The migration to add last_closed_date column might not have been applied');
+                    }
+                }
+
+                results.accountsProcessed = accounts.length;
+                return results;
             } catch (error) {
                 console.error('Error closing accounting period:', error);
                 throw error;

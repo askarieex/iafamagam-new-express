@@ -83,6 +83,21 @@
 }
 
 @layer components {
+  /* Add these rules to ensure content fills the available space */
+  .content {
+    @apply p-4 md:p-6 w-full;
+  }
+
+  /* Force full width for all pages */
+  .content > div {
+    @apply w-full;
+  }
+
+  /* Always ensure page contents are padded inside */
+  .page-content-wrapper {
+    @apply p-4 md:p-6 w-full;
+  }
+
   /* Layout components */
   .layout {
     @apply flex h-screen overflow-hidden;

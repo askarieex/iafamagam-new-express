@@ -38,7 +38,7 @@ const MainLayout = ({ children, title = 'IAFA Software' }) => {
                 <link rel="icon" href="/favicon.ico" />
             </Head>
 
-            <div className="app-layout">
+            <div className="flex h-screen bg-background-light dark:bg-background-dark overflow-hidden">
                 {/* Mobile menu overlay */}
                 {mobileMenuOpen && (
                     <div
@@ -48,41 +48,41 @@ const MainLayout = ({ children, title = 'IAFA Software' }) => {
                     />
                 )}
 
-                {/* Sidebar - hidden on mobile unless toggled */}
-                <div className={`${mobileMenuOpen ? 'block' : 'hidden'} lg:block`}>
+                {/* Sidebar */}
+                <div className={`fixed z-30 ${mobileMenuOpen ? 'block' : 'hidden'} lg:block h-full`}>
                     <Sidebar isOpen={sidebarOpen} toggleSidebar={toggleSidebar} lightMode={true} />
                 </div>
 
                 {/* Main content area */}
-                <div className={`main-container ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+                <div className={`flex flex-col flex-1 ${sidebarOpen ? 'ml-60' : 'ml-16'} transition-all duration-300`}>
                     {/* Top navigation bar */}
-                    <header className="app-header">
-                        <div className="header-container">
+                    <header className="bg-white dark:bg-secondary-900 shadow-sm border-b border-gray-100 dark:border-secondary-800 h-[65px] sticky top-0 z-20 flex items-center">
+                        <div className="flex items-center justify-between h-full w-full px-4 md:px-6">
                             {/* Mobile menu button */}
                             <button
-                                className="mobile-menu-btn"
+                                className="lg:hidden flex items-center justify-center w-9 h-9 rounded-md text-secondary-600 dark:text-secondary-400 hover:bg-gray-100 dark:hover:bg-secondary-800 transition-colors"
                                 onClick={toggleMobileMenu}
                                 aria-label="Open sidebar"
                             >
-                                <FaBars />
+                                <FaBars className="w-4 h-4" />
                             </button>
 
                             {/* Page title */}
-                            <h1 className="page-title">
+                            <h1 className="text-base lg:text-lg font-semibold text-secondary-800 dark:text-white">
                                 {title}
                             </h1>
 
                             {/* User profile/actions */}
-                            <div className="user-profile">
-                                <div className="avatar">
-                                    <FaUserCircle />
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400">
+                                    <FaUserCircle className="w-5 h-5" />
                                 </div>
                             </div>
                         </div>
                     </header>
 
                     {/* Main content */}
-                    <main className="content">
+                    <main className="flex-1 overflow-auto">
                         {children}
                     </main>
                 </div>

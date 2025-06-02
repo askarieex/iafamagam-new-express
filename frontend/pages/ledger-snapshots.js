@@ -9,10 +9,18 @@ import {
     FaDownload,
     FaExclamationCircle,
     FaLock,
-    FaUnlock
+    FaUnlock,
+    FaRegMoneyBillAlt,
+    FaRegFileAlt,
+    FaPrint,
+    FaChevronDown,
+    FaChevronRight,
+    FaWallet,
+    FaUniversity,
+    FaSyncAlt,
+    FaFilter
 } from 'react-icons/fa';
 import API_CONFIG from '../config';
-import Layout from '../components/Layout';
 
 export default function LedgerSnapshots() {
     const [accounts, setAccounts] = useState([]);
@@ -23,6 +31,7 @@ export default function LedgerSnapshots() {
     const [monthlySnapshots, setMonthlySnapshots] = useState([]);
     const [accountClosureStatus, setAccountClosureStatus] = useState({});
     const [activeTab, setActiveTab] = useState('all'); // 'all', 'closed', 'open'
+    const [collapsedMonths, setCollapsedMonths] = useState({});
 
     // Years range for filter
     const years = Array.from(
@@ -30,18 +39,26 @@ export default function LedgerSnapshots() {
         (_, i) => new Date().getFullYear() - 5 + i
     );
 
-    // Fetch accounts on page load
+    // Use effect for initial data loading
     useEffect(() => {
         fetchAccounts();
-        fetchAccountClosureStatus();
     }, []);
 
-    // Fetch monthly snapshots when selection changes
+    // Load account data and fetch snapshots whenever account is selected
     useEffect(() => {
-        if (selectedAccountId && selectedYear) {
-            fetchMonthlySnapshots();
+        if (selectedAccountId) {
+            fetchSnapshotsForYear();
+            fetchAccountClosureStatus();
         }
     }, [selectedAccountId, selectedYear]);
+
+    // Toggle month collapse state
+    const toggleMonthCollapse = (month) => {
+        setCollapsedMonths(prev => ({
+            ...prev,
+            [month]: !prev[month]
+        }));
+    };
 
     // Fetch all accounts
     const fetchAccounts = async () => {
@@ -99,7 +116,7 @@ export default function LedgerSnapshots() {
     };
 
     // Fetch monthly snapshots for all months in the selected year
-    const fetchMonthlySnapshots = async () => {
+    const fetchSnapshotsForYear = async () => {
         setLoading(true);
         setError(null);
 
@@ -213,21 +230,18 @@ export default function LedgerSnapshots() {
         return monthNames[month - 1];
     };
 
-    // Check if a month is closed
+    // Check if a month is closed based on last_closed_date
     const isMonthClosed = (month) => {
-        // If account closure status is not available, assume everything is open
-        const accountStatus = accountClosureStatus[selectedAccountId];
-        if (!accountStatus || !accountStatus.last_closed_date) return false;
+        if (!selectedAccountId || !accountClosureStatus[selectedAccountId] ||
+            !accountClosureStatus[selectedAccountId].last_closed_date) {
+            return false;
+        }
 
-        const lastClosedDate = new Date(accountStatus.last_closed_date);
-        const lastClosedMonth = lastClosedDate.getMonth() + 1;
-        const lastClosedYear = lastClosedDate.getFullYear();
+        const lastClosedDate = new Date(accountClosureStatus[selectedAccountId].last_closed_date);
+        const monthEndDate = new Date(selectedYear, month, 0); // Last day of the month
 
-        // Month is closed if it's in a previous year or same year but earlier/same month
-        return (
-            selectedYear < lastClosedYear ||
-            (selectedYear === lastClosedYear && month <= lastClosedMonth)
-        );
+        // Month is closed if the month end date is on or before the last closed date
+        return monthEndDate <= lastClosedDate;
     };
 
     // Group snapshots by month
@@ -258,294 +272,428 @@ export default function LedgerSnapshots() {
         );
     };
 
-    // Render a table for a specific month
-    const renderMonthTable = (month) => {
-        const snapshots = monthlySnapshots.filter(s => s.month === month);
-        const totals = getMonthlyTotals(month);
-        const isClosed = isMonthClosed(month);
+    // Get summary for annual data
+    const getAnnualSummary = () => {
+        return monthlySnapshots.reduce(
+            (totals, snapshot) => ({
+                receipts: totals.receipts + parseFloat(snapshot.receipts || 0),
+                payments: totals.payments + parseFloat(snapshot.payments || 0),
+                cashInHand: Math.max(totals.cashInHand, parseFloat(snapshot.cash_in_hand || 0)),
+                cashInBank: Math.max(totals.cashInBank, parseFloat(snapshot.cash_in_bank || 0))
+            }),
+            { receipts: 0, payments: 0, cashInHand: 0, cashInBank: 0 }
+        );
+    };
 
-        if (snapshots.length === 0) {
-            return (
-                <div className="mb-8 bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <div className="flex justify-between items-center mb-2">
-                        <h3 className="text-lg font-medium text-gray-900">
-                            {getMonthName(month)} {selectedYear}
-                            {isClosed && (
-                                <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    <FaLock className="w-3 h-3 mr-1" /> Closed
-                                </span>
-                            )}
-                        </h3>
-                    </div>
-                    <p className="text-gray-500 text-sm">No data available for this month</p>
-                </div>
-            );
-        }
+    // Render month table with visual indication for closed periods
+    const renderMonthTable = (month) => {
+        const monthName = getMonthName(month);
+        const monthData = getSnapshotsByMonth()[month] || [];
+        const monthTotals = getMonthlyTotals(month);
+        const closed = isMonthClosed(month);
+        const isCollapsed = collapsedMonths[month];
 
         return (
-            <div className="mb-8 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                <div className={`px-4 py-3 flex justify-between items-center ${isClosed ? 'bg-blue-50 border-b border-blue-100' : 'bg-gray-50 border-b border-gray-100'}`}>
-                    <h3 className="text-lg font-medium text-gray-900 flex items-center">
-                        {getMonthName(month)} {selectedYear}
-                        {isClosed ? (
-                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                <FaLock className="w-3 h-3 mr-1" /> Closed
-                            </span>
-                        ) : (
-                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                <FaUnlock className="w-3 h-3 mr-1" /> Open
+            <div key={month}
+                className={`mb-6 rounded-xl overflow-hidden shadow-md transition-all duration-300 ${closed ? 'border-l-4 border-gray-400' : 'border-l-4 border-green-400'
+                    }`}>
+                {/* Month header */}
+                <div
+                    className={`flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 cursor-pointer ${closed
+                        ? 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700'
+                        : 'bg-gradient-to-r from-emerald-50 to-teal-100 text-teal-800'
+                        }`}
+                    onClick={() => toggleMonthCollapse(month)}
+                >
+                    <div className="flex items-center space-x-2 mb-2 sm:mb-0">
+                        {isCollapsed ?
+                            <FaChevronRight className="text-xs opacity-70" /> :
+                            <FaChevronDown className="text-xs opacity-70" />
+                        }
+                        <h3 className="text-lg font-bold">
+                            {monthName} {selectedYear}
+                        </h3>
+                        {closed && (
+                            <span className="ml-2 flex items-center text-xs font-medium bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">
+                                <FaLock className="mr-1 text-xs" /> Closed
                             </span>
                         )}
-                    </h3>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 text-sm">
+                        <div className="text-right">
+                            <span className="block text-xs opacity-70">Receipts</span>
+                            <span className="font-semibold text-green-600">{formatCurrency(monthTotals.receipts)}</span>
+                        </div>
+                        <div className="text-right">
+                            <span className="block text-xs opacity-70">Payments</span>
+                            <span className="font-semibold text-red-600">{formatCurrency(monthTotals.payments)}</span>
+                        </div>
+                        <div className="text-right">
+                            <span className="block text-xs opacity-70">Balance</span>
+                            <span className="font-semibold">{formatCurrency(monthTotals.closingBalance)}</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Ledger Head
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Opening Balance
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Receipts
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Payments
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Closing Balance
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Cash In Hand
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Cash In Bank
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {snapshots.map((snapshot) => (
-                                <tr key={snapshot.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        {snapshot.ledgerHead?.name || 'Unknown'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                        {formatCurrency(snapshot.opening_balance)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-600">
-                                        {formatCurrency(snapshot.receipts)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-600">
-                                        {formatCurrency(snapshot.payments)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                                        {formatCurrency(snapshot.closing_balance)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                        {formatCurrency(snapshot.cash_in_hand)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                        {formatCurrency(snapshot.cash_in_bank)}
-                                    </td>
-                                </tr>
-                            ))}
+                {/* Month content */}
+                {!isCollapsed && (
+                    <div className={`transition-all duration-300 ${closed ? 'bg-gray-50' : 'bg-white'}`}>
+                        {monthData.length > 0 ? (
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[800px]">
+                                    <thead className={`text-xs uppercase ${closed ? 'bg-gray-200 text-gray-600' : 'bg-teal-50 text-teal-700'}`}>
+                                        <tr>
+                                            <th className="px-4 py-3 text-left font-semibold tracking-wider">
+                                                Ledger Head
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Opening Balance
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Receipts
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Payments
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Closing Balance
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Cash In Hand
+                                            </th>
+                                            <th className="px-4 py-3 text-right font-semibold tracking-wider">
+                                                Cash In Bank
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className={`divide-y divide-gray-200 ${closed ? 'text-gray-600' : 'text-gray-700'}`}>
+                                        {monthData.map((snapshot, idx) => (
+                                            <tr key={idx} className={`transition-colors hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                                                <td className="px-4 py-3 text-sm font-medium">
+                                                    {snapshot.ledgerHead?.name || 'Unknown'}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right">
+                                                    {formatCurrency(snapshot.opening_balance)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right text-green-600 font-medium">
+                                                    {formatCurrency(snapshot.receipts)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right text-red-600 font-medium">
+                                                    {formatCurrency(snapshot.payments)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right font-semibold">
+                                                    {formatCurrency(snapshot.closing_balance)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right">
+                                                    {formatCurrency(snapshot.cash_in_hand)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-right">
+                                                    {formatCurrency(snapshot.cash_in_bank)}
+                                                </td>
+                                            </tr>
+                                        ))}
 
-                            {/* Totals row */}
-                            <tr className="bg-gray-100 font-semibold">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                    TOTALS
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                    {formatCurrency(totals.openingBalance)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-700">
-                                    {formatCurrency(totals.receipts)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-700">
-                                    {formatCurrency(totals.payments)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                                    {formatCurrency(totals.closingBalance)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                    {formatCurrency(totals.cashInHand)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                    {formatCurrency(totals.cashInBank)}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                                        {/* Month totals row */}
+                                        <tr className={`font-bold ${closed ? 'bg-gray-200 text-gray-800' : 'bg-teal-50 text-teal-900'}`}>
+                                            <td className="px-4 py-3 text-sm">
+                                                TOTAL
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right">
+                                                {formatCurrency(monthTotals.openingBalance)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right text-green-700">
+                                                {formatCurrency(monthTotals.receipts)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right text-red-700">
+                                                {formatCurrency(monthTotals.payments)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right">
+                                                {formatCurrency(monthTotals.closingBalance)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right">
+                                                {formatCurrency(monthTotals.cashInHand)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-right">
+                                                {formatCurrency(monthTotals.cashInBank)}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className={`p-6 text-center ${closed ? 'bg-gray-50' : 'bg-white'}`}>
+                                <FaRegFileAlt className="mx-auto text-3xl text-gray-300 mb-2" />
+                                <p className="text-gray-500">No data available for {monthName} {selectedYear}</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // Render annual stats cards
+    const renderAnnualStats = () => {
+        if (monthlySnapshots.length === 0) return null;
+
+        const summary = getAnnualSummary();
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl p-4 shadow-lg">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xs uppercase tracking-wider opacity-80">Total Receipts</h3>
+                        <FaRegMoneyBillAlt className="text-xl opacity-70" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-bold">{formatCurrency(summary.receipts)}</div>
+                    <div className="mt-2 text-xs text-emerald-100">Year {selectedYear}</div>
+                </div>
+
+                <div className="bg-gradient-to-br from-rose-500 to-red-600 text-white rounded-xl p-4 shadow-lg">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xs uppercase tracking-wider opacity-80">Total Payments</h3>
+                        <FaRegMoneyBillAlt className="text-xl opacity-70" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-bold">{formatCurrency(summary.payments)}</div>
+                    <div className="mt-2 text-xs text-red-100">Year {selectedYear}</div>
+                </div>
+
+                <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-xl p-4 shadow-lg">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xs uppercase tracking-wider opacity-80">Net Balance</h3>
+                        <FaChartLine className="text-xl opacity-70" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-bold">{formatCurrency(summary.receipts - summary.payments)}</div>
+                    <div className="mt-2 text-xs text-indigo-100">Year {selectedYear}</div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500 to-sky-600 text-white rounded-xl p-4 shadow-lg">
+                    <div className="flex flex-col sm:flex-row sm:justify-between gap-3">
+                        <div className="flex-1">
+                            <div className="flex items-center mb-2">
+                                <FaWallet className="mr-2 opacity-70 text-xs" />
+                                <span className="text-xs uppercase tracking-wider opacity-80">Cash</span>
+                            </div>
+                            <div className="text-lg font-bold">{formatCurrency(summary.cashInHand)}</div>
+                        </div>
+                        <div className="flex-1">
+                            <div className="flex items-center mb-2">
+                                <FaUniversity className="mr-2 opacity-70 text-xs" />
+                                <span className="text-xs uppercase tracking-wider opacity-80">Bank</span>
+                            </div>
+                            <div className="text-lg font-bold">{formatCurrency(summary.cashInBank)}</div>
+                        </div>
+                    </div>
+                    <div className="mt-2 text-xs text-blue-100">Latest Balance</div>
                 </div>
             </div>
         );
     };
 
     return (
-        <Layout>
-            <div className="container mx-auto px-4 py-6">
-                <h1 className="text-2xl font-semibold mb-6 flex items-center">
-                    <FaChartLine className="mr-2" /> Ledger Balance Snapshots
-                </h1>
+        <div className="page-content-wrapper">
+            <div className="w-full space-y-5 animate-fadeIn">
+                {/* Page Header */}
+                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 dark:border-secondary-700">
+                        <div className="flex items-center gap-2 mb-3 sm:mb-0">
+                            <FaChartLine className="text-indigo-600 text-xl" />
+                            <h2 className="text-lg sm:text-xl font-semibold text-secondary-900 dark:text-white">
+                                Ledger Balance Snapshots
+                            </h2>
+                        </div>
 
-                {/* Filters */}
-                <div className="bg-white rounded-lg shadow-md mb-6 p-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="w-full sm:w-auto flex flex-wrap gap-2">
+                            <button
+                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
+                                onClick={fetchSnapshotsForYear}
+                                disabled={!selectedAccountId || loading}
+                            >
+                                {loading ? <FaSyncAlt className="mr-1.5 animate-spin" /> : <FaSearch className="mr-1.5" />}
+                                Generate Report
+                            </button>
+
+                            <button
+                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-green-600 hover:bg-green-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
+                                onClick={exportToCsv}
+                                disabled={monthlySnapshots.length === 0}
+                            >
+                                <FaDownload className="mr-1.5 text-green-200" /> CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Filter Section */}
+                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {/* Account selector */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Account
+                            <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
+                                <FaUniversity className="mr-1.5 text-indigo-500" /> Account
                             </label>
-                            <select
-                                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                value={selectedAccountId}
-                                onChange={(e) => setSelectedAccountId(e.target.value)}
-                            >
-                                <option value="">Select Account</option>
-                                {accounts.map((account) => (
-                                    <option key={account.id} value={account.id}>
-                                        {account.name}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="relative rounded-md shadow-sm">
+                                <select
+                                    className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                                    value={selectedAccountId}
+                                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                                >
+                                    <option value="">Select Account</option>
+                                    {accounts.map((account) => (
+                                        <option key={account.id} value={account.id}>
+                                            {account.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                    <FaChevronDown className="h-4 w-4" />
+                                </div>
+                            </div>
                         </div>
 
                         {/* Year selector */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Year
+                            <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
+                                <FaCalendarAlt className="mr-1.5 text-indigo-500" /> Financial Year
                             </label>
-                            <select
-                                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                value={selectedYear}
-                                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                            >
-                                {years.map(year => (
-                                    <option key={year} value={year}>
-                                        {year}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex items-end space-x-2">
-                            <button
-                                className="flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md flex items-center justify-center hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                                onClick={fetchMonthlySnapshots}
-                                disabled={!selectedAccountId}
-                            >
-                                <FaSearch className="mr-2" /> Generate Report
-                            </button>
-
-                            <button
-                                className="bg-green-600 text-white py-2 px-4 rounded-md flex items-center justify-center hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                                onClick={exportToCsv}
-                                disabled={monthlySnapshots.length === 0}
-                            >
-                                <FaDownload className="mr-2" /> Export CSV
-                            </button>
+                            <div className="relative rounded-md shadow-sm">
+                                <select
+                                    className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                                    value={selectedYear}
+                                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                                >
+                                    {years.map(year => (
+                                        <option key={year} value={year}>
+                                            {year}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                    <FaChevronDown className="h-4 w-4" />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Tab selector */}
-                <div className="flex space-x-2 mb-6">
-                    <button
-                        className={`px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'all' ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                        onClick={() => setActiveTab('all')}
-                    >
-                        All Months
-                    </button>
-                    <button
-                        className={`px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'closed' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                        onClick={() => setActiveTab('closed')}
-                    >
-                        <FaLock className="inline mr-1" /> Closed Periods
-                    </button>
-                    <button
-                        className={`px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'open' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                        onClick={() => setActiveTab('open')}
-                    >
-                        <FaUnlock className="inline mr-1" /> Open Periods
-                    </button>
+                {/* Tab Filters */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap bg-gray-100 text-gray-700 rounded-lg p-1 shadow-sm">
+                        <button
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'all' ?
+                                'bg-white text-indigo-700 shadow-sm' :
+                                'hover:bg-gray-200'}`}
+                            onClick={() => setActiveTab('all')}
+                        >
+                            <FaFilter className="inline mr-1.5 text-xs" />
+                            All Months
+                        </button>
+                        <button
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'closed' ?
+                                'bg-white text-indigo-700 shadow-sm' :
+                                'hover:bg-gray-200'}`}
+                            onClick={() => setActiveTab('closed')}
+                        >
+                            <FaLock className="inline mr-1.5 text-xs" />
+                            Closed Periods
+                        </button>
+                        <button
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'open' ?
+                                'bg-white text-indigo-700 shadow-sm' :
+                                'hover:bg-gray-200'}`}
+                            onClick={() => setActiveTab('open')}
+                        >
+                            <FaUnlock className="inline mr-1.5 text-xs" />
+                            Open Periods
+                        </button>
+                    </div>
+
+                    <div className="flex gap-2 text-sm">
+                        <button
+                            className="text-indigo-600 hover:text-indigo-800 flex items-center"
+                            onClick={() => setCollapsedMonths(
+                                Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, false]))
+                            )}
+                        >
+                            <FaChevronDown className="mr-1 text-xs" /> Expand All
+                        </button>
+
+                        <button
+                            className="text-indigo-600 hover:text-indigo-800 flex items-center"
+                            onClick={() => setCollapsedMonths(
+                                Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, true]))
+                            )}
+                        >
+                            <FaChevronRight className="mr-1 text-xs" /> Collapse All
+                        </button>
+                    </div>
                 </div>
 
                 {error && (
-                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4 flex items-center">
-                        <FaExclamationCircle className="mr-2" />
-                        <span>{error}</span>
+                    <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg flex items-center">
+                        <FaExclamationCircle className="text-red-500 mr-3 flex-shrink-0" />
+                        <div>
+                            <h3 className="text-sm font-medium text-red-800">Error</h3>
+                            <div className="mt-1 text-sm text-red-700">{error}</div>
+                        </div>
                     </div>
                 )}
 
                 {loading ? (
-                    <div className="flex justify-center items-center p-6 bg-white rounded-lg shadow-md">
-                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+                    <div className="flex flex-col items-center justify-center p-8 bg-white rounded-xl shadow-md">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+                        <p className="mt-4 text-indigo-600 font-medium">Loading data...</p>
                     </div>
                 ) : (
                     <>
                         {monthlySnapshots.length > 0 ? (
-                            <div className="space-y-6">
-                                {/* Year summary */}
-                                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg shadow-md p-4 mb-6">
-                                    <h2 className="text-xl font-bold mb-2">Annual Summary {selectedYear}</h2>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <div className="bg-white bg-opacity-20 rounded-lg p-3">
-                                            <div className="text-sm opacity-80">Total Receipts</div>
-                                            <div className="text-2xl font-bold">
-                                                {formatCurrency(monthlySnapshots.reduce((sum, s) => sum + parseFloat(s.receipts || 0), 0))}
-                                            </div>
-                                        </div>
-                                        <div className="bg-white bg-opacity-20 rounded-lg p-3">
-                                            <div className="text-sm opacity-80">Total Payments</div>
-                                            <div className="text-2xl font-bold">
-                                                {formatCurrency(monthlySnapshots.reduce((sum, s) => sum + parseFloat(s.payments || 0), 0))}
-                                            </div>
-                                        </div>
-                                        <div className="bg-white bg-opacity-20 rounded-lg p-3">
-                                            <div className="text-sm opacity-80">Net Balance</div>
-                                            <div className="text-2xl font-bold">
-                                                {formatCurrency(
-                                                    monthlySnapshots.reduce((sum, s) => sum + parseFloat(s.receipts || 0), 0) -
-                                                    monthlySnapshots.reduce((sum, s) => sum + parseFloat(s.payments || 0), 0)
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div className="space-y-5">
+                                {/* Annual summary cards */}
+                                {renderAnnualStats()}
 
                                 {/* Monthly tables */}
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
-                                    const isClosed = isMonthClosed(month);
-                                    const hasData = monthlySnapshots.some(s => s.month === month);
+                                <div className="space-y-4">
+                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+                                        const isClosed = isMonthClosed(month);
+                                        const hasData = monthlySnapshots.some(s => s.month === month);
 
-                                    // Filter based on active tab
-                                    if (
-                                        (activeTab === 'closed' && !isClosed) ||
-                                        (activeTab === 'open' && isClosed) ||
-                                        (!hasData && activeTab !== 'all')
-                                    ) {
-                                        return null;
-                                    }
+                                        // Filter based on active tab
+                                        if (
+                                            (activeTab === 'closed' && !isClosed) ||
+                                            (activeTab === 'open' && isClosed) ||
+                                            (!hasData && activeTab !== 'all')
+                                        ) {
+                                            return null;
+                                        }
 
-                                    return renderMonthTable(month);
-                                })}
+                                        return renderMonthTable(month);
+                                    })}
+                                </div>
                             </div>
                         ) : (
                             selectedAccountId && (
-                                <div className="bg-white rounded-lg shadow-md p-6 text-center text-gray-500">
-                                    <FaTable className="mx-auto mb-3 text-4xl" />
-                                    <p>No monthly data found for the selected account and year</p>
-                                    <p className="text-sm mt-2">Try selecting a different account or year</p>
+                                <div className="bg-white rounded-xl shadow-md p-8 text-center">
+                                    <FaTable className="mx-auto text-4xl text-gray-300 mb-4" />
+                                    <h3 className="text-lg font-medium text-gray-700 mb-2">No Data Available</h3>
+                                    <p className="text-gray-500 max-w-md mx-auto mb-4">
+                                        No monthly data found for the selected account and year.
+                                        Try selecting a different account or year.
+                                    </p>
+                                    <button
+                                        onClick={fetchSnapshotsForYear}
+                                        className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    >
+                                        <FaSyncAlt className="mr-2 -ml-1" /> Refresh Data
+                                    </button>
                                 </div>
                             )
                         )}
                     </>
                 )}
             </div>
-        </Layout>
+        </div>
     );
-} 
+}
+
+// Set page title for MainLayout
+LedgerSnapshots.pageTitle = "Ledger Balance Snapshots";

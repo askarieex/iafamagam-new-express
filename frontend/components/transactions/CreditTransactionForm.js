@@ -15,7 +15,8 @@ import {
     FaReceipt,
     FaRegCreditCard,
     FaLayerGroup,
-    FaCheckCircle
+    FaCheckCircle,
+    FaLock
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
@@ -455,190 +456,102 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
         return getAvailableReceiptNumbers(selectedBooklet);
     }, [selectedBooklet]);
 
-    // Handle form input changes
+    // Handle input change
     const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        console.log(`Input changed: ${name} = ${value}`);
+        const { name, value, type } = e.target;
+        let updatedValue = value;
 
-        // Special handling for account_id (reset ledger_head_id)
-        if (name === 'account_id') {
-            // Get credit type ledger heads for the selected account
-            const accountCreditLedgerHeads = ledgerHeads.filter(
-                head => head && head.account_id === value && head.head_type === 'credit'
-            );
-
-            console.log(`Selected account ${value}, found ${accountCreditLedgerHeads.length} credit ledger heads`);
-
-            // Update form with the new account and first available credit ledger head
+        // Reset receipt_no if booklet changes
+        if (name === 'booklet_id') {
             setFormData(prev => ({
                 ...prev,
-                account_id: value,
-                ledger_head_id: accountCreditLedgerHeads.length > 0 ? accountCreditLedgerHeads[0].id : ''
-            }));
-
-            // Clear any errors
-            if (errors.account_id || errors.ledger_head_id) {
-                setErrors(prev => ({
-                    ...prev,
-                    account_id: null,
-                    ledger_head_id: null
-                }));
-            }
-        }
-        // Special handling for booklet_id (auto-populate receipt number)
-        else if (name === 'booklet_id') {
-            // Find the selected booklet
-            const newSelectedBooklet = booklets.find(b => b && b.id.toString() === value.toString());
-
-            console.log('Booklet selection:', {
-                selected_id: value,
-                found: newSelectedBooklet ? true : false,
-                booklet_no: newSelectedBooklet ? newSelectedBooklet.booklet_no : 'Not found'
-            });
-
-            // Reset receipt number when changing booklet
-            setFormData(prev => ({
-                ...prev,
-                booklet_id: value,
+                [name]: value,
                 receipt_no: ''
             }));
+            return;
+        }
 
-            // Auto-select first receipt number after a short delay
-            if (newSelectedBooklet) {
-                const receipts = getAvailableReceiptNumbers(newSelectedBooklet);
-                if (receipts.length > 0) {
-                    setFormData(prev => ({
+        if (name === 'tx_date') {
+            // Check if this date is in a closed period when date is changed
+            const selectedDate = new Date(value);
+
+            // If we have the selected account with a last_closed_date
+            if (selectedAccount && selectedAccount.last_closed_date) {
+                const lastClosedDate = new Date(selectedAccount.last_closed_date);
+
+                // Set both dates to start of day for accurate comparison
+                selectedDate.setHours(0, 0, 0, 0);
+                lastClosedDate.setHours(0, 0, 0, 0);
+
+                // If the selected date is on or before the last closed date
+                if (selectedDate <= lastClosedDate) {
+                    // Add validation error
+                    setErrors(prev => ({
                         ...prev,
-                        booklet_id: value,
-                        receipt_no: receipts[0]
+                        tx_date: `This date falls in a closed accounting period. Periods up to ${formatDate(selectedAccount.last_closed_date)} are locked.`
                     }));
+                } else {
+                    // Clear validation error if it was set
+                    setErrors(prev => {
+                        const newErrors = { ...prev };
+                        delete newErrors.tx_date;
+                        return newErrors;
+                    });
                 }
             }
         }
-        // Special handling for receipt_no selection
-        else if (name === 'receipt_no') {
-            console.log('Receipt number selection:', {
-                previous: formData.receipt_no,
-                new: value,
-                booklet_id: formData.booklet_id
-            });
 
-            setFormData(prev => ({
-                ...prev,
-                receipt_no: value
-            }));
-        }
-        // Special handling for cash_type
-        else if (name === 'cash_type') {
-            console.log('Payment method changed to:', value);
-
-            // Reset amount fields when changing payment method
-            if (value === 'cash') {
+        // For cash_type = 'multiple', reset amount since it's computed
+        if (name === 'cash_type') {
+            if (value === 'multiple') {
                 setFormData(prev => ({
                     ...prev,
-                    cash_type: value,
-                    amount: prev.cash_amount || '',
+                    [name]: value,
+                    amount: '',
                     bank_amount: '',
-                    cash_amount: prev.cash_amount || ''
+                    cash_amount: ''
                 }));
-            } else if (value === 'bank') {
-                setFormData(prev => ({
-                    ...prev,
-                    cash_type: value,
-                    amount: prev.bank_amount || '',
-                    cash_amount: '',
-                    bank_amount: prev.bank_amount || ''
-                }));
-            } else if (value === 'multiple' || value === 'both') {
-                // Initialize both cash and bank amounts if they don't exist
-                const cashAmount = formData.cash_amount || 0;
-                const bankAmount = formData.bank_amount || 0;
-                const totalAmount = parseFloat(cashAmount) + parseFloat(bankAmount);
-
-                console.log('Setting up "multiple" payment method:', {
-                    cashAmount,
-                    bankAmount,
-                    totalAmount
-                });
-
-                setFormData(prev => ({
-                    ...prev,
-                    cash_type: 'multiple', // Always use 'multiple' for backend compatibility
-                    cash_amount: prev.cash_amount || '',
-                    bank_amount: prev.bank_amount || '',
-                    amount: totalAmount > 0 ? totalAmount : ''
-                }));
+                return;
             } else {
-                // For other payment types (upi, card, etc.), treat as bank
+                // When switching away from multiple, clear bank_amount and cash_amount
                 setFormData(prev => ({
                     ...prev,
-                    cash_type: value,
-                    amount: prev.amount || '',
-                    cash_amount: 0,
-                    bank_amount: prev.amount || ''
+                    [name]: value,
+                    bank_amount: '',
+                    cash_amount: ''
                 }));
+                return;
             }
         }
-        // For bank_amount and cash_amount, update only the specific field and recalculate total
-        else if (name === 'bank_amount' || name === 'cash_amount') {
-            const numValue = value === '' ? '' : parseFloat(value);
 
-            // Get the complementary amount (if cash_amount, get bank_amount and vice versa)
-            const otherFieldName = name === 'bank_amount' ? 'cash_amount' : 'bank_amount';
-            const otherFieldValue = formData[otherFieldName] || 0;
+        // Special handling for amount fields to enforce numeric values
+        if (name === 'amount' || name === 'bank_amount' || name === 'cash_amount') {
+            // Allow empty string, numbers, and decimal point
+            if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                if (formData.cash_type === 'multiple' && name === 'amount') {
+                    // Don't update the amount field directly for multiple payment type
+                    return;
+                }
 
-            // Calculate the new total amount
-            const newTotalAmount = value === ''
-                ? (otherFieldValue === '' ? '' : parseFloat(otherFieldValue))
-                : parseFloat(numValue) + (otherFieldValue === '' ? 0 : parseFloat(otherFieldValue));
-
-            console.log(`Updated ${name} to ${numValue}, calculating total with ${otherFieldName}=${otherFieldValue}:`, newTotalAmount);
-
-            setFormData(prev => ({
-                ...prev,
-                [name]: numValue,
-                amount: newTotalAmount === '' ? '' : newTotalAmount
-            }));
-        }
-        // For regular amount field
-        else if (name === 'amount') {
-            // When cash_type is 'cash' or 'bank', update the amount and also the corresponding specific amount
-            if (formData.cash_type === 'cash') {
-                const numValue = value === '' ? '' : parseFloat(value);
-                setFormData(prev => ({
-                    ...prev,
-                    amount: numValue,
-                    cash_amount: numValue
-                }));
-            } else if (formData.cash_type === 'bank') {
-                const numValue = value === '' ? '' : parseFloat(value);
-                setFormData(prev => ({
-                    ...prev,
-                    amount: numValue,
-                    bank_amount: numValue
-                }));
+                updatedValue = value;
             } else {
-                const numValue = value === '' ? '' : parseFloat(value);
-                setFormData(prev => ({
-                    ...prev,
-                    amount: numValue
-                }));
+                // Invalid input, don't update state
+                return;
             }
         }
-        // Handle other fields normally
-        else {
-            setFormData(prev => ({
-                ...prev,
-                [name]: name === 'amount' ? (value === '' ? '' : parseFloat(value)) : value
-            }));
-        }
 
-        // Clear validation error for this field
+        setFormData(prev => ({
+            ...prev,
+            [name]: updatedValue
+        }));
+
+        // Clear specific error when field is updated
         if (errors[name]) {
-            setErrors(prev => ({
-                ...prev,
-                [name]: null
-            }));
+            setErrors(prev => {
+                const newErrors = { ...prev };
+                delete newErrors[name];
+                return newErrors;
+            });
         }
     };
 
@@ -646,52 +559,46 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const validateForm = () => {
         const newErrors = {};
 
-        // Required fields
+        // Required fields validation
         if (!formData.account_id) newErrors.account_id = 'Account is required';
-        if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Ledger head is required';
-        if (!formData.booklet_id) newErrors.booklet_id = 'Booklet is required';
-        if (!formData.receipt_no) newErrors.receipt_no = 'Receipt number is required';
-        if (!formData.tx_date) newErrors.tx_date = 'Date is required';
+        if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Ledger Head is required';
 
-        // Amount validation based on cash_type
+        // Amount validation
         if (formData.cash_type === 'multiple') {
-            // For 'multiple' cash type, check both cash_amount and bank_amount
             if (!formData.cash_amount && !formData.bank_amount) {
-                newErrors.cash_amount = 'At least one amount is required';
-                newErrors.bank_amount = 'At least one amount is required';
+                newErrors.cash_amount = 'At least one payment amount is required';
+                newErrors.bank_amount = 'At least one payment amount is required';
             } else {
-                // Check cash_amount if provided
-                if (formData.cash_amount && (isNaN(formData.cash_amount) || parseFloat(formData.cash_amount) <= 0)) {
-                    newErrors.cash_amount = 'Cash amount must be greater than zero';
-                }
-
-                // Check bank_amount if provided
-                if (formData.bank_amount && (isNaN(formData.bank_amount) || parseFloat(formData.bank_amount) <= 0)) {
-                    newErrors.bank_amount = 'Bank amount must be greater than zero';
-                }
-
-                // Check that at least one amount is greater than zero
-                const cashAmount = parseFloat(formData.cash_amount || 0);
-                const bankAmount = parseFloat(formData.bank_amount || 0);
-                if ((cashAmount + bankAmount) <= 0) {
+                const cashAmount = parseFloat(formData.cash_amount) || 0;
+                const bankAmount = parseFloat(formData.bank_amount) || 0;
+                if (cashAmount + bankAmount <= 0) {
                     newErrors.amount = 'Total amount must be greater than zero';
                 }
             }
         } else {
-            // For single payment methods, check the main amount
-            if (!formData.amount) {
-                newErrors.amount = 'Amount is required';
-            } else if (isNaN(formData.amount) || parseFloat(formData.amount) <= 0) {
+            if (!formData.amount || parseFloat(formData.amount) <= 0) {
                 newErrors.amount = 'Amount must be greater than zero';
             }
         }
 
-        // Check if transaction date is in a closed period
-        if (formData.tx_date && selectedAccount && selectedAccount.last_closed_date) {
-            const txDate = new Date(formData.tx_date);
-            const closedDate = new Date(selectedAccount.last_closed_date);
+        // Receipt related validations
+        if (formData.booklet_id && !formData.receipt_no) {
+            newErrors.receipt_no = 'Receipt number is required';
+        }
 
-            if (txDate <= closedDate) {
+        // Date validation
+        if (!formData.tx_date) {
+            newErrors.tx_date = 'Transaction date is required';
+        } else if (selectedAccount && selectedAccount.last_closed_date) {
+            // Check if transaction date is in a closed period
+            const txDate = new Date(formData.tx_date);
+            const lastClosedDate = new Date(selectedAccount.last_closed_date);
+
+            // Set both dates to start of day for accurate comparison
+            txDate.setHours(0, 0, 0, 0);
+            lastClosedDate.setHours(0, 0, 0, 0);
+
+            if (txDate <= lastClosedDate) {
                 newErrors.tx_date = `This date falls in a closed accounting period. Periods up to ${new Date(selectedAccount.last_closed_date).toLocaleDateString()} are locked.`;
             }
         }
@@ -714,11 +621,11 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const formatDate = (dateString) => {
         if (!dateString) return '';
         const date = new Date(dateString);
-        return new Intl.DateTimeFormat('en-IN', {
+        return date.toLocaleDateString('en-IN', {
             year: 'numeric',
             month: 'short',
             day: 'numeric'
-        }).format(date);
+        });
     };
 
     // Handle form submission
@@ -1041,6 +948,99 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
         setIsAccountDropdownOpen(false);
     };
 
+    // Admin override modal
+    const renderAdminOverrideModal = () => {
+        return (
+            <div className={`fixed inset-0 z-50 flex items-center justify-center ${showAdminOverrideModal ? 'visible' : 'invisible'}`}>
+                {/* Modal backdrop */}
+                {showAdminOverrideModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={() => setShowAdminOverrideModal(false)}></div>
+                )}
+
+                {/* Modal content */}
+                <div className={`relative bg-white rounded-lg shadow-xl transform transition-all max-w-lg w-full p-6 ${showAdminOverrideModal ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+                    <div className="flex items-center justify-between border-b pb-3">
+                        <h3 className="text-xl font-medium text-gray-900 flex items-center">
+                            <FaExclamationTriangle className="text-yellow-500 mr-2" />
+                            Closed Period Override
+                        </h3>
+                        <button
+                            onClick={() => setShowAdminOverrideModal(false)}
+                            className="text-gray-400 hover:text-gray-500"
+                        >
+                            <FaTimes />
+                        </button>
+                    </div>
+
+                    <div className="py-4">
+                        <p className="text-sm text-gray-500 mb-4">
+                            You are creating a transaction dated <strong>{formatDate(formData.tx_date)}</strong>, which falls in a closed period.
+                            The account <strong>{selectedAccount?.name}</strong> has been closed through <strong>{formatDate(selectedAccount?.last_closed_date)}</strong>.
+                        </p>
+
+                        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                            <div className="flex items-start">
+                                <FaExclamationTriangle className="text-yellow-500 mr-3 mt-0.5" />
+                                <div>
+                                    <p className="font-medium text-sm text-yellow-700">Warning</p>
+                                    <p className="text-sm text-yellow-600">
+                                        Creating backdated transactions in closed periods will automatically recalculate all monthly snapshots
+                                        from this date forward. This may affect reports and financial statements that have already been generated.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p className="font-medium text-gray-700 mb-2">Are you sure you want to proceed?</p>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-3 border-t">
+                        <button
+                            onClick={() => setShowAdminOverrideModal(false)}
+                            className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleAdminOverride}
+                            className="px-4 py-2 bg-yellow-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-yellow-700"
+                        >
+                            Override and Create
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // Set min date for the date picker - 1 day after the last closed date
+    const getMinDate = () => {
+        if (selectedAccount && selectedAccount.last_closed_date) {
+            const lastClosed = new Date(selectedAccount.last_closed_date);
+            lastClosed.setDate(lastClosed.getDate() + 1); // One day after last closed date
+            return lastClosed.toISOString().split('T')[0];
+        }
+        return null;
+    };
+
+    // Add the closed period notice in the form
+    const renderClosedPeriodNotice = () => {
+        if (selectedAccount && selectedAccount.last_closed_date) {
+            return (
+                <div className="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4">
+                    <div className="flex items-center">
+                        <FaLock className="text-blue-500 mr-2" />
+                        <p className="text-sm text-blue-700">
+                            Note: Periods up to {formatDate(selectedAccount.last_closed_date)} are closed
+                            {isAdmin && ' (admin override available)'}
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+        return null;
+    };
+
     // Render form UI
     return (
         <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -1326,6 +1326,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                             onChange={handleInputChange}
                                             className="pl-7 w-full bg-white border border-gray-200 focus:border-green-400 rounded px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-green-400 shadow-sm transition-all duration-200 hover:shadow"
                                             disabled={submitting}
+                                            min={getMinDate()}
                                         />
                                     </div>
                                     {errors.tx_date && (
@@ -1736,6 +1737,8 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                     </div>
                 </div>
             )}
+
+            {renderAdminOverrideModal()}
         </div>
     );
 } 

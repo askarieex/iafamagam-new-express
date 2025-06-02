@@ -1,4 +1,7 @@
 const express = require('express');
+const cron = require('node-cron');
+const runMonthEndClosure = require('./jobs/monthEndClosure');
+const autoClosePreviousMonth = require('./jobs/autoClosePreviousMonth');
 
 // Import routes
 const accountRoutes = require('./routes/accountRoutes');
@@ -12,6 +15,7 @@ const chequeRoutes = require('./routes/chequeRoutes');
 const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 // Import Sequelize models
 const db = require('./models');
+const monthlyClosureService = require('./services/monthlyClosureService');
 
 const cors = require('cors');
 require('dotenv').config();
@@ -65,6 +69,41 @@ app.use((req, res) => {
         message: 'Route not found'
     });
 });
+
+// Schedule month-end job to run at 2:00 AM on the 1st day of each month
+cron.schedule('0 2 1 * *', async () => {
+    console.log('Running month-end procedures...');
+    await runMonthEndClosure();
+});
+
+// Schedule the auto-close job to run at 1:00 AM on the 1st day of each month
+// This ensures the previous month is closed automatically when a new month begins
+cron.schedule('0 1 1 * *', async () => {
+    console.log('Auto-closing previous month...');
+    try {
+        // Get the previous month and year
+        const today = new Date();
+        let prevMonth = today.getMonth(); // 0-11, current month - 1 gives the previous month
+        let prevYear = today.getFullYear();
+
+        // Handle January case
+        if (prevMonth === 0) {
+            prevMonth = 12;
+            prevYear--;
+        }
+
+        console.log(`Auto-closing month ${prevMonth}/${prevYear} for all accounts`);
+
+        // Use the monthlyClosureService to close the previous month for all accounts
+        const result = await monthlyClosureService.closeAccountingPeriod(prevMonth, prevYear);
+        console.log('Auto-close completed:', result);
+    } catch (error) {
+        console.error('Error during auto-close of previous month:', error);
+    }
+});
+
+console.log('Month-end closure scheduled for 2:00 AM on the 1st day of each month');
+console.log('Auto-close previous month scheduled for 1:00 AM on the 1st day of each month');
 
 // Sync database and start server without dropping tables
 db.sequelize.sync()

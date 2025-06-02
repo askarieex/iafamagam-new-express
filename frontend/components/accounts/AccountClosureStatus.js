@@ -64,6 +64,40 @@ export default function AccountClosureStatus() {
         setIsModalOpen(true);
     };
 
+    // Handle force closing the current month immediately
+    const handleForceCloseCurrentMonth = async (account) => {
+        if (!confirm(`Are you sure you want to force close the current month for ${account.name}? This will lock all transactions up to today.`)) {
+            return;
+        }
+
+        setProcessingAction(true);
+
+        try {
+            const response = await axios.post(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/force-close-current`,
+                { account_id: account.id }
+            );
+
+            if (response.data.success) {
+                toast.success('Current month closed successfully');
+
+                // Update the accounts list with the new last_closed_date
+                fetchAccounts();
+
+                // Reload the page to reflect the changes
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                toast.error(response.data.message || 'Failed to close current month');
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || err.message || 'An error occurred');
+        } finally {
+            setProcessingAction(false);
+        }
+    };
+
     // Handle opening the reopen period modal
     const handleReopenPeriodClick = (account) => {
         setReopeningAccount(account);
@@ -102,12 +136,20 @@ export default function AccountClosureStatus() {
 
             const response = await axios.post(
                 `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/close`,
-                { account_id, month, year }
+                { account_id, month: parseInt(month) + 1, year: parseInt(year) } // Add 1 to month since UI shows 0-indexed months
             );
 
             if (response.data.success) {
                 toast.success('Period closed successfully');
+
+                // Update the accounts list with the new last_closed_date
                 fetchAccounts();
+
+                // Reload the page to reflect the changes
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+
                 setIsModalOpen(false);
                 setClosingAccount(null);
             } else {
@@ -256,6 +298,14 @@ export default function AccountClosureStatus() {
                                     >
                                         <FaLock className="inline mr-1" />
                                         Close Period
+                                    </button>
+                                    <button
+                                        onClick={() => handleForceCloseCurrentMonth(account)}
+                                        className="text-red-600 hover:text-red-900 mr-4"
+                                        disabled={processingAction}
+                                    >
+                                        <FaLock className="inline mr-1" />
+                                        Force Close Now
                                     </button>
                                     {account.last_closed_date && (
                                         <button

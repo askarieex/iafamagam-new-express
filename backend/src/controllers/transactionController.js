@@ -2,6 +2,46 @@ const transactionService = require('../services/transactionService');
 const db = require('../models');
 
 /**
+ * Validates if a transaction date is in a closed period
+ * @param {*} account The account object
+ * @param {*} txDate Transaction date string (YYYY-MM-DD)
+ * @param {*} adminOverride Whether admin override is specified
+ */
+const validateClosedPeriod = (account, txDate, adminOverride = false) => {
+    // If no last closed date, no validation needed
+    if (!account.last_closed_date) {
+        return { allowed: true };
+    }
+
+    const txDateObj = new Date(txDate);
+    const lastClosedDateObj = new Date(account.last_closed_date);
+
+    // Set both dates to start of day for accurate comparison
+    txDateObj.setHours(0, 0, 0, 0);
+    lastClosedDateObj.setHours(0, 0, 0, 0);
+
+    // If transaction date is on or before the last closed date
+    if (txDateObj <= lastClosedDateObj) {
+        // If admin override is provided, allow with warning
+        if (adminOverride) {
+            return {
+                allowed: true,
+                warning: `This transaction is backdated to a closed period (${account.last_closed_date}). Admin override applied.`
+            };
+        } else {
+            // Otherwise, block the transaction
+            return {
+                allowed: false,
+                error: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can override this restriction.`
+            };
+        }
+    }
+
+    // Date is after the closed period, so it's allowed
+    return { allowed: true };
+};
+
+/**
  * Transaction Controller
  */
 class TransactionController {
@@ -11,40 +51,49 @@ class TransactionController {
      * @param {Object} res - Express response object
      */
     async createCredit(req, res) {
+        const t = await db.sequelize.transaction();
+
         try {
             const creditData = req.body;
 
             // Validate required fields
             if (!creditData.account_id || !creditData.ledger_head_id || !creditData.booklet_id ||
                 !creditData.amount || !creditData.cash_type || !creditData.tx_date) {
+                await t.rollback();
                 return res.status(400).json({
                     success: false,
                     message: 'Missing required fields'
                 });
             }
 
-            // Check if transaction date is in a closed period
+            // Fetch the account
             const account = await db.Account.findByPk(creditData.account_id);
             if (!account) {
+                await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: 'Account not found'
                 });
             }
 
-            // If account has a last closed date and transaction date is in or before closed period
-            if (account.last_closed_date &&
-                new Date(creditData.tx_date) <= new Date(account.last_closed_date)) {
-                // Allow admin override if specified
-                if (!creditData.admin_override) {
-                    return res.status(403).json({
-                        success: false,
-                        message: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can make changes to closed periods.`
-                    });
-                }
+            // Validate against closed period
+            const closedPeriodCheck = validateClosedPeriod(
+                account,
+                creditData.tx_date,
+                creditData.admin_override
+            );
 
-                // If we get here, the user is an admin and has confirmed the override
-                console.log(`Admin override used for credit transaction in closed period: ${creditData.tx_date}`);
+            if (!closedPeriodCheck.allowed) {
+                await t.rollback();
+                return res.status(403).json({
+                    success: false,
+                    message: closedPeriodCheck.error
+                });
+            }
+
+            // If there's a warning, log it but allow the transaction
+            if (closedPeriodCheck.warning) {
+                console.warn(`Admin override for closed period: ${closedPeriodCheck.warning}`);
             }
 
             const transaction = await transactionService.createCredit(creditData);
@@ -70,12 +119,14 @@ class TransactionController {
                 }
             }
 
+            await t.commit();
             return res.status(201).json({
                 success: true,
                 data: transaction,
                 message: 'Credit transaction created successfully'
             });
         } catch (error) {
+            await t.rollback();
             console.error('Error creating credit transaction:', error);
             return res.status(500).json({
                 success: false,
@@ -90,6 +141,8 @@ class TransactionController {
      * @param {Object} res - Express response object
      */
     async createDebit(req, res) {
+        const t = await db.sequelize.transaction();
+
         try {
             const debitData = req.body;
 
@@ -97,34 +150,41 @@ class TransactionController {
             if (!debitData.account_id || !debitData.ledger_head_id ||
                 !debitData.amount || !debitData.cash_type || !debitData.tx_date ||
                 !debitData.sources || !debitData.sources.length) {
+                await t.rollback();
                 return res.status(400).json({
                     success: false,
                     message: 'Missing required fields'
                 });
             }
 
-            // Check if transaction date is in a closed period
+            // Fetch the account
             const account = await db.Account.findByPk(debitData.account_id);
             if (!account) {
+                await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: 'Account not found'
                 });
             }
 
-            // If account has a last closed date and transaction date is in or before closed period
-            if (account.last_closed_date &&
-                new Date(debitData.tx_date) <= new Date(account.last_closed_date)) {
-                // Allow admin override if specified
-                if (!debitData.admin_override) {
-                    return res.status(403).json({
-                        success: false,
-                        message: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can make changes to closed periods.`
-                    });
-                }
+            // Validate against closed period
+            const closedPeriodCheck = validateClosedPeriod(
+                account,
+                debitData.tx_date,
+                debitData.admin_override
+            );
 
-                // If we get here, the user is an admin and has confirmed the override
-                console.log(`Admin override used for debit transaction in closed period: ${debitData.tx_date}`);
+            if (!closedPeriodCheck.allowed) {
+                await t.rollback();
+                return res.status(403).json({
+                    success: false,
+                    message: closedPeriodCheck.error
+                });
+            }
+
+            // If there's a warning, log it but allow the transaction
+            if (closedPeriodCheck.warning) {
+                console.warn(`Admin override for closed period: ${closedPeriodCheck.warning}`);
             }
 
             const transaction = await transactionService.createDebit(debitData);
@@ -159,12 +219,14 @@ class TransactionController {
                 }
             }
 
+            await t.commit();
             return res.status(201).json({
                 success: true,
                 data: transaction,
                 message: 'Debit transaction created successfully'
             });
         } catch (error) {
+            await t.rollback();
             console.error('Error creating debit transaction:', error);
             return res.status(500).json({
                 success: false,

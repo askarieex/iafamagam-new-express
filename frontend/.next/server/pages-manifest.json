@@ -2,8 +2,7 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/manage-ledger": "pages/manage-ledger.js",
-  "/transactions": "pages/transactions.js",
+  "/booklets": "pages/booklets.js",
   "/ledger-snapshots": "pages/ledger-snapshots.js",
-  "/period-closure": "pages/period-closure.js"
+  "/cheque-management": "pages/cheque-management.js"
 }

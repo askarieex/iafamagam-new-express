@@ -1,25 +1,31 @@
 import { useState } from 'react';
-import Layout from '../components/Layout';
-import AccountClosureStatus from '../components/accounts/AccountClosureStatus';
 import { FaLock, FaCalendar, FaFile } from 'react-icons/fa';
+import AccountClosureStatus from '../components/accounts/AccountClosureStatus';
 
 export default function PeriodClosure() {
     const [activeTab, setActiveTab] = useState('status');
 
     return (
-        <Layout>
-            <div className="container mx-auto px-4 py-6">
-                <h1 className="text-2xl font-semibold mb-6 flex items-center">
-                    <FaLock className="mr-2" /> Accounting Period Management
-                </h1>
+        <div className="page-content-wrapper">
+            <div className="w-full animate-fadeIn">
+                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden mb-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 dark:border-secondary-700">
+                        <div className="flex items-center gap-2 mb-3 sm:mb-0">
+                            <FaLock className="text-indigo-600 text-xl" />
+                            <h2 className="text-lg sm:text-xl font-semibold text-secondary-900 dark:text-white">
+                                Accounting Period Management
+                            </h2>
+                        </div>
+                    </div>
+                </div>
 
                 {/* Tabs */}
-                <div className="border-b border-gray-200 mb-6">
+                <div className="border-b border-gray-200 mb-6 px-1">
                     <nav className="flex space-x-8">
                         <button
                             className={`pb-4 px-1 font-medium text-sm flex items-center ${activeTab === 'status'
-                                    ? 'border-b-2 border-indigo-500 text-indigo-600'
-                                    : 'text-gray-500 hover:text-gray-700 hover:border-b-2 hover:border-gray-300'
+                                ? 'border-b-2 border-indigo-500 text-indigo-600'
+                                : 'text-gray-500 hover:text-gray-700 hover:border-b-2 hover:border-gray-300'
                                 }`}
                             onClick={() => setActiveTab('status')}
                         >
@@ -28,8 +34,8 @@ export default function PeriodClosure() {
                         </button>
                         <button
                             className={`pb-4 px-1 font-medium text-sm flex items-center ${activeTab === 'documentation'
-                                    ? 'border-b-2 border-indigo-500 text-indigo-600'
-                                    : 'text-gray-500 hover:text-gray-700 hover:border-b-2 hover:border-gray-300'
+                                ? 'border-b-2 border-indigo-500 text-indigo-600'
+                                : 'text-gray-500 hover:text-gray-700 hover:border-b-2 hover:border-gray-300'
                                 }`}
                             onClick={() => setActiveTab('documentation')}
                         >
@@ -45,10 +51,10 @@ export default function PeriodClosure() {
                 )}
 
                 {activeTab === 'documentation' && (
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <h2 className="text-xl font-medium text-gray-900 mb-4">Period Closure Documentation</h2>
+                    <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-6">
+                        <h2 className="text-xl font-medium text-gray-900 dark:text-white mb-4">Period Closure Documentation</h2>
 
-                        <div className="prose max-w-none">
+                        <div className="prose max-w-none dark:prose-invert">
                             <h3>Understanding Period Closure</h3>
                             <p>
                                 Period closure is an important accounting practice that locks a specific time period in your financial records,
@@ -101,6 +107,9 @@ export default function PeriodClosure() {
                     </div>
                 )}
             </div>
-        </Layout>
+        </div>
     );
-} 
+}
+
+// Set page title
+PeriodClosure.pageTitle = "Period Closure"; 

@@ -15,10 +15,10 @@ function MyApp({ Component, pageProps }) {
     // Get the page title from the Component if available
     const pageTitle = Component.pageTitle || 'IAFA Software';
     const router = useRouter();
-    
+
     // Special cases for certain pages
     const isChequeManagementPage = router.pathname === '/cheque-management';
-    
+
     if (isChequeManagementPage) {
         // Don't wrap the cheque management page with layout or toast container
         return <Component {...pageProps} />;

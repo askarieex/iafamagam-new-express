@@ -41,17 +41,12 @@ module.exports = (sequelize) => {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,
       defaultValue: 0.00
-    }
-    // The last_closed_date field is commented out until migration is successful
-    // Uncomment after running migration successfully
-    /*
-    ,
+    },
     last_closed_date: {
       type: DataTypes.DATEONLY,
       allowNull: true,
       comment: 'Last day of the most recently closed accounting period'
     }
-    */
   }, {
     sequelize,
     modelName: 'Account',

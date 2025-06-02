@@ -170,12 +170,30 @@ class TransactionService {
                         side: '+'
                     });
 
-                    // Update the ledger head balance
+                    // Calculate proportional cash and bank amounts for this split
+                    let splitCashAmount = 0;
+                    let splitBankAmount = 0;
+
+                    if (data.cash_type === 'multiple') {
+                        // Calculate the proportion of this split relative to the total
+                        const ratio = parseFloat(split.amount) / parseFloat(data.amount);
+                        splitCashAmount = parseFloat(data.cash_amount || 0) * ratio;
+                        splitBankAmount = parseFloat(data.bank_amount || 0) * ratio;
+                    } else if (data.cash_type === 'cash') {
+                        splitCashAmount = parseFloat(split.amount);
+                        splitBankAmount = 0;
+                    } else {
+                        // For bank, cheque, UPI, etc.
+                        splitCashAmount = 0;
+                        splitBankAmount = parseFloat(split.amount);
+                    }
+
+                    // Update the ledger head balance with properly proportioned cash/bank amounts
                     await this.updateLedgerHeadBalance(
                         split.ledger_head_id,
                         split.amount,
-                        data.cash_type === 'cash' ? split.amount : 0,
-                        data.cash_type !== 'cash' ? split.amount : 0,
+                        splitCashAmount,
+                        splitBankAmount,
                         '+',
                         data.tx_date,
                         t
@@ -523,6 +541,122 @@ class TransactionService {
     }
 
     /**
+     * Recalculate a single month's snapshot from raw transaction data
+     * @private
+     */
+    async recalculateSingleMonth(ledgerHeadId, accountId, txDate, transaction) {
+        // Parse date to get month and year
+        const txDateObj = new Date(txDate);
+        const month = txDateObj.getMonth() + 1; // 1-12
+        const year = txDateObj.getFullYear();
+
+        // Calculate the start and end date of the month
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 0); // Last day of the month
+
+        // Format dates for SQL query
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = endDate.toISOString().split('T')[0];
+
+        // Find the snapshot for this month
+        const snapshot = await db.MonthlyLedgerBalance.findOne({
+            where: {
+                account_id: accountId,
+                ledger_head_id: ledgerHeadId,
+                month,
+                year
+            },
+            transaction
+        });
+
+        if (!snapshot) {
+            console.log(`No snapshot found for ledger ${ledgerHeadId} in ${month}/${year}, nothing to recalculate`);
+            return;
+        }
+
+        // Recalculate receipts and payments from raw transaction data
+        const sums = await sequelize.query(`
+            SELECT
+                SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE 0 END) as receipts,
+                SUM(CASE WHEN ti.side = '-' THEN ti.amount ELSE 0 END) as payments,
+                SUM(CASE WHEN ti.side = '+' THEN 
+                    CASE WHEN t.cash_type = 'cash' THEN ti.amount 
+                         WHEN t.cash_type = 'multiple' THEN 
+                            (ti.amount / t.amount) * t.cash_amount 
+                         ELSE 0 END 
+                    ELSE 0 END) as cash_receipts,
+                SUM(CASE WHEN ti.side = '-' THEN 
+                    CASE WHEN t.cash_type = 'cash' THEN ti.amount 
+                         WHEN t.cash_type = 'multiple' THEN 
+                            (ti.amount / t.amount) * t.cash_amount
+                         ELSE 0 END 
+                    ELSE 0 END) as cash_payments,
+                SUM(CASE WHEN ti.side = '+' THEN 
+                    CASE WHEN t.cash_type = 'cash' THEN 0 
+                         WHEN t.cash_type = 'multiple' THEN 
+                            (ti.amount / t.amount) * t.bank_amount
+                         ELSE ti.amount END 
+                    ELSE 0 END) as bank_receipts,
+                SUM(CASE WHEN ti.side = '-' THEN 
+                    CASE WHEN t.cash_type = 'cash' THEN 0 
+                         WHEN t.cash_type = 'multiple' THEN 
+                            (ti.amount / t.amount) * t.bank_amount
+                         ELSE ti.amount END 
+                    ELSE 0 END) as bank_payments
+            FROM transaction_items ti
+            JOIN transactions t ON ti.transaction_id = t.id
+            WHERE ti.ledger_head_id = :ledgerHeadId 
+            AND t.tx_date BETWEEN :startDate AND :endDate
+            AND t.status = 'completed'
+        `, {
+            replacements: {
+                ledgerHeadId,
+                startDate: startDateStr,
+                endDate: endDateStr
+            },
+            type: sequelize.QueryTypes.SELECT,
+            transaction
+        });
+
+        // Extract the results
+        const receipts = sums[0]?.receipts ? parseFloat(sums[0].receipts || 0) : 0;
+        const payments = sums[0]?.payments ? parseFloat(sums[0].payments || 0) : 0;
+        const cashReceipts = sums[0]?.cash_receipts ? parseFloat(sums[0].cash_receipts || 0) : 0;
+        const cashPayments = sums[0]?.cash_payments ? parseFloat(sums[0].cash_payments || 0) : 0;
+        const bankReceipts = sums[0]?.bank_receipts ? parseFloat(sums[0].bank_receipts || 0) : 0;
+        const bankPayments = sums[0]?.bank_payments ? parseFloat(sums[0].bank_payments || 0) : 0;
+
+        // Calculate net cash and bank
+        const netCashInHand = cashReceipts - cashPayments;
+        const netCashInBank = bankReceipts - bankPayments;
+
+        // Calculate closing balance
+        const openingBalance = parseFloat(snapshot.opening_balance);
+        const closingBalance = openingBalance + receipts - payments;
+
+        console.log(`Recalculated snapshot for ${month}/${year} ledger ${ledgerHeadId}:`, {
+            receipts,
+            payments,
+            netCashInHand,
+            netCashInBank,
+            openingBalance,
+            closingBalance
+        });
+
+        // Update the snapshot with recalculated values
+        await snapshot.update({
+            receipts,
+            payments,
+            closing_balance: closingBalance,
+            cash_in_hand: netCashInHand,
+            cash_in_bank: netCashInBank
+        }, { transaction });
+
+        console.log(`Updated monthly snapshot for ${month}/${year} with recalculated values`);
+        return snapshot;
+    }
+
+    /**
      * Void (delete) a transaction
      * @param {string} transactionId - Transaction ID to void
      * @returns {Promise<boolean>} Success status
@@ -541,39 +675,30 @@ class TransactionService {
 
             // If it's a credit transaction and has a booklet, restore the receipt page
             if (transaction.tx_type === 'credit' && transaction.booklet_id && transaction.receipt_no) {
+                // Get the booklet
                 const booklet = await db.Booklet.findByPk(transaction.booklet_id, {
                     transaction: t
                 });
 
                 if (booklet) {
-                    // Check if there are any other transactions with this booklet and receipt number
-                    const duplicateTransactions = await db.Transaction.count({
-                        where: {
-                            booklet_id: transaction.booklet_id,
-                            receipt_no: transaction.receipt_no,
-                            id: { [Op.ne]: transactionId } // Exclude the current transaction
-                        },
-                        transaction: t
-                    });
+                    // Restore the receipt page as available
+                    await db.BookletPage.update(
+                        { status: 'available' },
+                        {
+                            where: {
+                                booklet_id: transaction.booklet_id,
+                                page_no: transaction.receipt_no
+                            },
+                            transaction: t
+                        }
+                    );
 
-                    if (duplicateTransactions > 0) {
-                        console.warn(`Receipt number ${transaction.receipt_no} is used by other transactions, not adding back to booklet ${transaction.booklet_id}`);
-                    } else {
-                        // Only add the receipt number back if it's not used by other transactions
-                        console.log(`Restoring receipt number ${transaction.receipt_no} to booklet ${transaction.booklet_id}`);
-                        const pagesLeft = [...booklet.pages_left, transaction.receipt_no];
-
-                        // Sort the pages_left array numerically to maintain proper order
-                        pagesLeft.sort((a, b) => parseInt(a) - parseInt(b));
-
-                        // Update the booklet with the restored receipt number
-                        await booklet.update({
-                            pages_left: pagesLeft,
-                            is_active: true // Also reactivate the booklet if it was closed
-                        }, { transaction: t });
-                    }
+                    console.log(`Restored receipt page ${transaction.receipt_no} in booklet ${transaction.booklet_id}`);
                 }
             }
+
+            // Track affected ledger heads and their transaction dates
+            const affectedLedgers = new Map();
 
             // Reverse all balance changes
             for (const item of transaction.items) {
@@ -595,10 +720,27 @@ class TransactionService {
                     transaction.tx_date,
                     t
                 );
+
+                // Store affected ledger and transaction date for recalculation
+                affectedLedgers.set(item.ledger_head_id, {
+                    accountId: transaction.account_id,
+                    txDate: transaction.tx_date
+                });
             }
 
             // Delete the transaction and its items (cascade deletion)
             await transaction.destroy({ transaction: t });
+
+            // Recalculate monthly snapshots for all affected ledgers
+            for (const [ledgerHeadId, data] of affectedLedgers.entries()) {
+                await this.recalculateSingleMonth(
+                    ledgerHeadId,
+                    data.accountId,
+                    data.txDate,
+                    t
+                );
+                console.log(`Recalculated monthly snapshot for ledger ${ledgerHeadId} after voiding transaction`);
+            }
 
             return true;
         });
@@ -718,21 +860,46 @@ class TransactionService {
                 }
             }
 
-            // Create the monthly balance with correct opening balance
-            monthlyBalance = await db.MonthlyLedgerBalance.create({
-                account_id: ledgerHead.account_id,
-                ledger_head_id: ledgerHeadId,
-                month,
-                year,
-                opening_balance: openingBalance,
-                receipts: side === '+' ? parseFloat(amount) : 0,
-                payments: side === '-' ? parseFloat(amount) : 0,
-                closing_balance: openingBalance + (side === '+' ? parseFloat(amount) : -parseFloat(amount)),
-                cash_in_hand: side === '+' ? parseFloat(cashAmount) : -parseFloat(cashAmount),
-                cash_in_bank: side === '+' ? parseFloat(bankAmount) : -parseFloat(bankAmount)
-            }, { transaction });
+            // Create the monthly balance with correct opening balance - use try/catch for race condition protection
+            try {
+                monthlyBalance = await db.MonthlyLedgerBalance.create({
+                    account_id: ledgerHead.account_id,
+                    ledger_head_id: ledgerHeadId,
+                    month,
+                    year,
+                    opening_balance: openingBalance,
+                    receipts: side === '+' ? parseFloat(amount) : 0,
+                    payments: side === '-' ? parseFloat(amount) : 0,
+                    closing_balance: openingBalance + (side === '+' ? parseFloat(amount) : -parseFloat(amount)),
+                    cash_in_hand: side === '+' ? parseFloat(cashAmount) : -parseFloat(cashAmount),
+                    cash_in_bank: side === '+' ? parseFloat(bankAmount) : -parseFloat(bankAmount)
+                }, { transaction });
 
-            console.log(`Created new monthly balance for ${month}/${year} with opening ${openingBalance}`);
+                console.log(`Created new monthly balance for ${month}/${year} with opening ${openingBalance}`);
+            } catch (err) {
+                // Handle race condition where another transaction might have created this record
+                if (err.name === 'SequelizeUniqueConstraintError') {
+                    console.log(`Race condition detected - another process created the monthly balance for ${month}/${year}`);
+                    // Try to fetch the record again
+                    monthlyBalance = await db.MonthlyLedgerBalance.findOne({
+                        where: {
+                            account_id: ledgerHead.account_id,
+                            ledger_head_id: ledgerHeadId,
+                            month,
+                            year
+                        },
+                        transaction,
+                        lock: true
+                    });
+
+                    if (!monthlyBalance) {
+                        throw new Error(`Failed to create or find monthly balance for ${month}/${year}`);
+                    }
+                } else {
+                    // Re-throw if it's not a unique constraint error
+                    throw err;
+                }
+            }
         } else {
             // Update monthly balance receipts/payments and closing
             let newReceipts = parseFloat(monthlyBalance.receipts);

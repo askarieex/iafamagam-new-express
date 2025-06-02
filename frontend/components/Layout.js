@@ -45,7 +45,7 @@ const Layout = ({ children, title = 'IAFA Software' }) => {
                 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             </Head>
 
-            <div className="h-screen bg-background-light dark:bg-background-dark overflow-hidden">
+            <div className="flex h-screen bg-background-light dark:bg-background-dark overflow-hidden">
                 {/* Mobile menu overlay */}
                 {mobileMenuOpen && (
                     <div
@@ -55,20 +55,19 @@ const Layout = ({ children, title = 'IAFA Software' }) => {
                     />
                 )}
 
-                {/* Sidebar */}
-                <Sidebar
-                    isOpen={sidebarOpen}
-                    toggleSidebar={toggleSidebar}
-                    lightMode={true}
-                />
+                {/* Sidebar - Fixed width */}
+                <div className={`fixed z-30 ${sidebarOpen ? 'w-60' : 'w-16'} transition-all duration-300 ease-in-out`}>
+                    <Sidebar
+                        isOpen={sidebarOpen}
+                        toggleSidebar={toggleSidebar}
+                        lightMode={true}
+                    />
+                </div>
 
-                {/* Main content area */}
-                <div
-                    className={`flex flex-col h-full transition-all duration-300 ease-in-out
-                              ${sidebarOpen ? 'lg:ml-60' : 'lg:ml-16'}`}
-                >
+                {/* Main content area - Adjusted to work with fixed sidebar */}
+                <div className={`flex flex-col flex-1 transition-all duration-300 ease-in-out ${sidebarOpen ? 'ml-60' : 'ml-16'}`}>
                     {/* Top navigation bar */}
-                    <header className="bg-white dark:bg-secondary-900 shadow-sm border-b border-gray-100 dark:border-secondary-800 h-[65px] sticky top-0 z-30 flex items-center">
+                    <header className="bg-white dark:bg-secondary-900 shadow-sm border-b border-gray-100 dark:border-secondary-800 h-[65px] sticky top-0 z-20 flex items-center">
                         <div className="flex items-center justify-between h-full w-full px-4 md:px-6">
                             {/* Mobile menu button */}
                             <button
@@ -93,8 +92,8 @@ const Layout = ({ children, title = 'IAFA Software' }) => {
                         </div>
                     </header>
 
-                    {/* Main content with improved scrolling */}
-                    <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-3 sm:p-4 md:p-6">
+                    {/* Main content area with scroll */}
+                    <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
                         {children}
                     </main>
                 </div>

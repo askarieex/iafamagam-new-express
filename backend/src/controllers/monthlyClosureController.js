@@ -39,16 +39,80 @@ exports.closeAccountingPeriod = async (req, res) => {
             account_id ? parseInt(account_id) : null
         );
 
+        // Get the updated account to return the last_closed_date
+        let updatedAccount = null;
+        if (account_id) {
+            const { Account } = require('../models');
+            updatedAccount = await Account.findByPk(account_id);
+        }
+
         return res.status(200).json({
             success: true,
             message: 'Accounting period closed successfully',
-            data: result
+            data: result,
+            account: updatedAccount ? {
+                id: updatedAccount.id,
+                name: updatedAccount.name,
+                last_closed_date: updatedAccount.last_closed_date
+            } : null
         });
     } catch (error) {
         console.error('Error closing accounting period:', error);
         return res.status(500).json({
             success: false,
             message: 'Failed to close accounting period',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Force close the current month for a specific account
+ * @route POST /api/monthly-closure/force-close-current
+ */
+exports.forceCloseCurrentMonth = async (req, res) => {
+    try {
+        const { account_id } = req.body;
+
+        // Validate required fields
+        if (!account_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Account ID is required'
+            });
+        }
+
+        // Get current date
+        const today = new Date();
+        const currentMonth = today.getMonth() + 1; // Convert from 0-based to 1-based
+        const currentYear = today.getFullYear();
+
+        // Use the existing close accounting period function
+        const result = await monthlyClosureService.closeAccountingPeriod(
+            currentMonth,
+            currentYear,
+            parseInt(account_id)
+        );
+
+        // Get the updated account
+        const { Account } = require('../models');
+        const updatedAccount = await Account.findByPk(account_id);
+
+        return res.status(200).json({
+            success: true,
+            message: `Current month (${currentMonth}/${currentYear}) closed successfully`,
+            data: result,
+            account: updatedAccount ? {
+                id: updatedAccount.id,
+                name: updatedAccount.name,
+                last_closed_date: updatedAccount.last_closed_date
+            } : null
+        });
+    } catch (error) {
+        console.error('Error force closing current month:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to force close current month',
             error: error.message
         });
     }
@@ -155,39 +219,19 @@ exports.getClosureStatus = async (req, res) => {
     try {
         const { Account } = require('../models');
 
-        // For now, return a simplified version without using last_closed_date
-        // until migrations are fixed
+        // Try to get accounts with their closure status
+        let accounts;
         try {
-            const accounts = await Account.findAll({
+            accounts = await Account.findAll({
+                attributes: ['id', 'name', 'last_closed_date']
+            });
+        } catch (dbError) {
+            // If the column doesn't exist, get accounts without last_closed_date
+            console.warn('last_closed_date column may not exist, falling back to basic account info');
+            accounts = await Account.findAll({
                 attributes: ['id', 'name']
             });
-
-            const accountStatus = accounts.map(account => {
-                return {
-                    id: account.id,
-                    name: account.name,
-                    last_closed_date: null,
-                    status: 'never_closed',
-                };
-            });
-
-            return res.status(200).json({
-                success: true,
-                data: accountStatus
-            });
-        } catch (innerError) {
-            console.error('Error in simplified getClosureStatus:', innerError);
-            return res.status(500).json({
-                success: false,
-                message: 'Unable to fetch accounts',
-                error: innerError.message
-            });
         }
-
-        /* Commented out original implementation until migration is fixed
-        const accounts = await Account.findAll({
-            attributes: ['id', 'name', 'last_closed_date']
-        });
 
         const currentDate = new Date();
         const accountStatus = accounts.map(account => {
@@ -214,7 +258,7 @@ exports.getClosureStatus = async (req, res) => {
             return {
                 id: account.id,
                 name: account.name,
-                last_closed_date: account.last_closed_date,
+                last_closed_date: lastClosedDate,
                 status,
             };
         });
@@ -223,7 +267,6 @@ exports.getClosureStatus = async (req, res) => {
             success: true,
             data: accountStatus
         });
-        */
     } catch (error) {
         console.error('Error fetching closure status:', error);
         return res.status(500).json({

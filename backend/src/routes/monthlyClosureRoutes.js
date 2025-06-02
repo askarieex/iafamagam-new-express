@@ -5,13 +5,16 @@ const router = express.Router();
 // Close an accounting period
 router.post('/close', monthlyClosureController.closeAccountingPeriod);
 
-// Reopen a closed period
+// Reopen a previously closed accounting period
 router.post('/reopen', monthlyClosureController.reopenPeriod);
 
-// Recalculate snapshots after backdated transaction
+// Recalculate monthly snapshots after a backdated transaction
 router.post('/recalculate', monthlyClosureController.recalculateSnapshots);
 
-// Get account closure status
+// Force close the current month immediately
+router.post('/force-close-current', monthlyClosureController.forceCloseCurrentMonth);
+
+// Get closure status
 router.get('/status', monthlyClosureController.getClosureStatus);
 
 module.exports = router; 
