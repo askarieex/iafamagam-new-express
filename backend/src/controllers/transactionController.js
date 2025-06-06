@@ -20,24 +20,38 @@ const validateClosedPeriod = (account, txDate, adminOverride = false) => {
     txDateObj.setHours(0, 0, 0, 0);
     lastClosedDateObj.setHours(0, 0, 0, 0);
 
-    // If transaction date is on or before the last closed date
+    // Check if transaction is in or before a closed period
     if (txDateObj <= lastClosedDateObj) {
-        // If admin override is provided, allow with warning
         if (adminOverride) {
-            return {
-                allowed: true,
-                warning: `This transaction is backdated to a closed period (${account.last_closed_date}). Admin override applied.`
-            };
-        } else {
-            // Otherwise, block the transaction
-            return {
-                allowed: false,
-                error: `The transaction date falls in a closed accounting period (${account.last_closed_date}). Only administrators can override this restriction.`
-            };
+            return { allowed: true, requiresRecalculation: true };
         }
+        return {
+            allowed: false,
+            message: `Cannot enter transactions on or before the last closed date (${account.last_closed_date}). The period is closed.`
+        };
     }
 
-    // Date is after the closed period, so it's allowed
+    // Calculate the maximum allowed transaction date
+    // This enforces only one open period at a time (next month after last closed)
+
+    // Get the month after the last closed date
+    const maxAllowedDateObj = new Date(lastClosedDateObj);
+    maxAllowedDateObj.setMonth(maxAllowedDateObj.getMonth() + 2, 0); // Last day of next month
+
+    // Check if transaction is beyond the allowed open period
+    if (txDateObj > maxAllowedDateObj) {
+        if (adminOverride) {
+            return { allowed: true };
+        }
+
+        return {
+            allowed: false,
+            message: `Cannot enter transactions for future periods. Only one open period is allowed at a time. ` +
+                `You can only enter transactions until ${maxAllowedDateObj.toISOString().split('T')[0]}.`
+        };
+    }
+
+    // Transaction is within allowed open period
     return { allowed: true };
 };
 
@@ -87,7 +101,7 @@ class TransactionController {
                 await t.rollback();
                 return res.status(403).json({
                     success: false,
-                    message: closedPeriodCheck.error
+                    message: closedPeriodCheck.message
                 });
             }
 
@@ -98,14 +112,17 @@ class TransactionController {
 
             const transaction = await transactionService.createCredit(creditData);
 
-            // If this was an admin override for a closed period, recalculate the monthly snapshots
-            if (creditData.admin_override && account.last_closed_date &&
-                new Date(creditData.tx_date) <= new Date(account.last_closed_date)) {
+            // Store transaction date info to determine if recalculation is needed
+            const txDateObj = new Date(creditData.tx_date);
+            const today = new Date();
+            const isBackdated = txDateObj < today;
+
+            // Recalculate monthly snapshots if the transaction is backdated
+            // This ensures all periods maintain balance consistency
+            if (isBackdated) {
                 try {
-                    // Import the service here to avoid circular dependencies
                     const monthlyClosureService = require('../services/monthlyClosureService');
 
-                    // Recalculate snapshots from the transaction date forward
                     await monthlyClosureService.recalculateMonthlySnapshots(
                         creditData.account_id,
                         creditData.ledger_head_id,
@@ -115,7 +132,6 @@ class TransactionController {
                     console.log(`Recalculated monthly snapshots after backdated credit transaction: ${creditData.tx_date}`);
                 } catch (recalcError) {
                     console.error('Failed to recalculate monthly snapshots:', recalcError);
-                    // Don't fail the request, just log the error
                 }
             }
 
@@ -178,7 +194,7 @@ class TransactionController {
                 await t.rollback();
                 return res.status(403).json({
                     success: false,
-                    message: closedPeriodCheck.error
+                    message: closedPeriodCheck.message
                 });
             }
 
@@ -189,14 +205,18 @@ class TransactionController {
 
             const transaction = await transactionService.createDebit(debitData);
 
-            // If this was an admin override for a closed period, recalculate the monthly snapshots
-            if (debitData.admin_override && account.last_closed_date &&
-                new Date(debitData.tx_date) <= new Date(account.last_closed_date)) {
+            // Store transaction date info to determine if recalculation is needed
+            const txDateObj = new Date(debitData.tx_date);
+            const today = new Date();
+            const isBackdated = txDateObj < today;
+
+            // Recalculate monthly snapshots if the transaction is backdated 
+            // This ensures all periods maintain balance consistency
+            if (isBackdated) {
                 try {
-                    // Import the service here to avoid circular dependencies
                     const monthlyClosureService = require('../services/monthlyClosureService');
 
-                    // Recalculate snapshots for the target ledger head
+                    // Recalculate for the target ledger head
                     await monthlyClosureService.recalculateMonthlySnapshots(
                         debitData.account_id,
                         debitData.ledger_head_id,
@@ -215,7 +235,6 @@ class TransactionController {
                     console.log(`Recalculated monthly snapshots after backdated debit transaction: ${debitData.tx_date}`);
                 } catch (recalcError) {
                     console.error('Failed to recalculate monthly snapshots:', recalcError);
-                    // Don't fail the request, just log the error
                 }
             }
 

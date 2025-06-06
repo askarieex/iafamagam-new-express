@@ -1,7 +1,8 @@
 const express = require('express');
 const cron = require('node-cron');
-const runMonthEndClosure = require('./jobs/monthEndClosure');
+const monthEndClosure = require('./jobs/monthEndClosure');
 const autoClosePreviousMonth = require('./jobs/autoClosePreviousMonth');
+const reconcileBalances = require('./jobs/reconcileBalances');
 const cookieParser = require('cookie-parser');
 const seedAdminUser = require('./seeders/adminUserSeeder');
 
@@ -15,9 +16,11 @@ const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
 const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
+const reconciliationRoutes = require('./routes/reconciliationRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+
 // Import Sequelize models
 const db = require('./models');
 const monthlyClosureService = require('./services/monthlyClosureService');
@@ -64,6 +67,7 @@ app.use('/api/booklets', protect, bookletRoutes);
 app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
 app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
+app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -83,40 +87,40 @@ app.use((req, res) => {
     });
 });
 
-// Schedule month-end job to run at 2:00 AM on the 1st day of each month
-cron.schedule('0 2 1 * *', async () => {
-    console.log('Running month-end procedures...');
-    await runMonthEndClosure();
-});
+// Schedule all jobs
 
-// Schedule the auto-close job to run at 1:00 AM on the 1st day of each month
-// This ensures the previous month is closed automatically when a new month begins
-cron.schedule('0 1 1 * *', async () => {
-    console.log('Auto-closing previous month...');
+// Run month-end closure every night at 11:30 PM
+cron.schedule('30 23 * * *', async () => {
+    console.log('Running scheduled month-end closure job');
     try {
-        // Get the previous month and year
-        const today = new Date();
-        let prevMonth = today.getMonth(); // 0-11, current month - 1 gives the previous month
-        let prevYear = today.getFullYear();
-
-        // Handle January case
-        if (prevMonth === 0) {
-            prevMonth = 12;
-            prevYear--;
-        }
-
-        console.log(`Auto-closing month ${prevMonth}/${prevYear} for all accounts`);
-
-        // Use the monthlyClosureService to close the previous month for all accounts
-        const result = await monthlyClosureService.closeAccountingPeriod(prevMonth, prevYear);
-        console.log('Auto-close completed:', result);
+        await monthEndClosure();
+        console.log('Month-end closure job completed successfully');
     } catch (error) {
-        console.error('Error during auto-close of previous month:', error);
+        console.error('Month-end closure job failed:', error);
     }
 });
 
-console.log('Month-end closure scheduled for 2:00 AM on the 1st day of each month');
-console.log('Auto-close previous month scheduled for 1:00 AM on the 1st day of each month');
+// Run auto-close previous month job at 1 AM on the 1st day of each month
+cron.schedule('0 1 1 * *', async () => {
+    console.log('Running scheduled auto-close previous month job');
+    try {
+        await autoClosePreviousMonth();
+        console.log('Auto-close previous month job completed successfully');
+    } catch (error) {
+        console.error('Auto-close previous month job failed:', error);
+    }
+});
+
+// Run balance reconciliation job every night at 2 AM
+cron.schedule('0 2 * * *', async () => {
+    console.log('Running scheduled balance reconciliation job');
+    try {
+        await reconcileBalances();
+        console.log('Balance reconciliation job completed successfully');
+    } catch (error) {
+        console.error('Balance reconciliation job failed:', error);
+    }
+});
 
 // Sync database and start server without dropping tables
 db.sequelize.sync()

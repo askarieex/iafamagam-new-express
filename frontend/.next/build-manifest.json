@@ -22,20 +22,25 @@
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/accounts": [
+    "/booklets": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/accounts.js"
+      "static/chunks/pages/booklets.js"
     ],
-    "/dashboard": [
+    "/cheque-management": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/dashboard.js"
+      "static/chunks/pages/cheque-management.js"
     ],
     "/ledger-snapshots": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
       "static/chunks/pages/ledger-snapshots.js"
+    ],
+    "/period-management": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/period-management.js"
     ],
     "/transactions": [
       "static/chunks/webpack.js",

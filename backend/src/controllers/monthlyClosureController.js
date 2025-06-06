@@ -1,4 +1,5 @@
 const monthlyClosureService = require('../services/monthlyClosureService');
+const { Op } = require('sequelize');
 
 /**
  * Close an accounting period
@@ -30,6 +31,75 @@ exports.closeAccountingPeriod = async (req, res) => {
                 success: false,
                 message: 'Year must be between 2000 and 2100'
             });
+        }
+
+        // If specific account ID provided
+        if (account_id) {
+            const { Account, Transaction } = require('../models');
+            const account = await Account.findByPk(account_id);
+            
+            if (!account) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Account not found'
+                });
+            }
+
+            // Calculate the last day of the month being closed
+            const lastDay = new Date(year, month, 0).getDate();
+            const closingDate = new Date(year, month - 1, lastDay);
+            
+            // Check if this month is sequential with the last closed period
+            if (account.last_closed_date) {
+                const lastClosedDate = new Date(account.last_closed_date);
+                
+                // Check if this period is already closed
+                if (
+                    lastClosedDate.getFullYear() === year &&
+                    lastClosedDate.getMonth() + 1 === month &&
+                    lastClosedDate.getDate() >= lastDay
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'This period is already closed'
+                    });
+                }
+
+                // Check for gaps in period closure
+                const expectedPrevMonth = new Date(closingDate);
+                expectedPrevMonth.setMonth(expectedPrevMonth.getMonth() - 1);
+                
+                // Format both dates to YYYY-MM format for comparison
+                const expectedPrevMonthFormatted = `${expectedPrevMonth.getFullYear()}-${String(expectedPrevMonth.getMonth() + 1).padStart(2, '0')}`;
+                const lastClosedFormatted = `${lastClosedDate.getFullYear()}-${String(lastClosedDate.getMonth() + 1).padStart(2, '0')}`;
+
+                if (expectedPrevMonthFormatted !== lastClosedFormatted) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Cannot close this period. Please close previous periods first to maintain sequential closure.'
+                    });
+                }
+            }
+
+            // Check for future transactions that would be affected
+            const endOfMonth = new Date(year, month, 0).toISOString().split('T')[0];
+            
+            const futureTransactionCount = await Transaction.count({
+                where: {
+                    account_id: account_id,
+                    tx_date: {
+                        [Op.gt]: endOfMonth
+                    },
+                    status: 'completed'
+                }
+            });
+
+            if (futureTransactionCount > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot close this period. There are ${futureTransactionCount} transactions with dates after this period that would be affected.`
+                });
+            }
         }
 
         // Call service to close period
@@ -272,6 +342,49 @@ exports.getClosureStatus = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Failed to fetch closure status',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get period closure history for an account
+ * @route GET /api/monthly-closure/history
+ */
+exports.getPeriodHistory = async (req, res) => {
+    try {
+        const { account_id } = req.query;
+        
+        if (!account_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Account ID is required'
+            });
+        }
+        
+        const { AuditLog } = require('../models');
+        
+        const history = await AuditLog.findAll({
+            where: {
+                entity_type: 'Account',
+                entity_id: account_id,
+                action: {
+                    [Op.in]: ['periodClosed', 'periodReopened']
+                }
+            },
+            order: [['created_at', 'DESC']],
+            limit: 100
+        });
+        
+        return res.status(200).json({
+            success: true,
+            data: history
+        });
+    } catch (error) {
+        console.error('Error getting period history:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to get period closure history',
             error: error.message
         });
     }

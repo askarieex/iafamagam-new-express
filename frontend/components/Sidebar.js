@@ -109,8 +109,8 @@ const Sidebar = ({ isOpen, toggleSidebar, lightMode = false }) => {
                     permission: 'reports'
                 },
                 {
-                    name: 'Monthly Reports',
-                    path: '/monthly-reports',
+                    name: 'Period Management',
+                    path: '/period-management',
                     icon: <FaCalendarAlt />,
                     permission: 'reports'
                 },
@@ -118,12 +118,6 @@ const Sidebar = ({ isOpen, toggleSidebar, lightMode = false }) => {
                     name: 'Ledger Snapshots',
                     path: '/ledger-snapshots',
                     icon: <FaChartBar />,
-                    permission: 'reports'
-                },
-                {
-                    name: 'Period Closure',
-                    path: '/period-closure',
-                    icon: <FaLock />,
                     permission: 'reports'
                 },
                 {
