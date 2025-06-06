@@ -19,25 +19,25 @@ self.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/admin": [
+    "/accounts": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/admin.js"
+      "static/chunks/pages/accounts.js"
     ],
-    "/auth/debug-tools": [
+    "/dashboard": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/auth/debug-tools.js"
+      "static/chunks/pages/dashboard.js"
     ],
-    "/auth/login": [
+    "/ledger-snapshots": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/auth/login.js"
+      "static/chunks/pages/ledger-snapshots.js"
     ],
-    "/auth/register": [
+    "/transactions": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/auth/register.js"
+      "static/chunks/pages/transactions.js"
     ]
   },
   "ampFirstPages": []

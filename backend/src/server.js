@@ -17,9 +17,11 @@ const chequeRoutes = require('./routes/chequeRoutes');
 const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 // Import Sequelize models
 const db = require('./models');
 const monthlyClosureService = require('./services/monthlyClosureService');
+const { protect, authorize } = require('./middleware/authMiddleware');
 
 const cors = require('cors');
 require('dotenv').config();
@@ -42,6 +44,27 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Public routes (no authentication required)
+app.use('/api/auth', authRoutes);
+app.get('/', (req, res) => {
+    res.send('IAFA Software API is running');
+});
+
+// Protected routes (authentication required)
+app.use('/api/users', protect, userRoutes);
+app.use('/api/admin', protect, authorize('admin'), adminRoutes);
+
+// Other protected routes - all require authentication
+app.use('/api/accounts', protect, accountRoutes);
+app.use('/api/bank-accounts', protect, bankAccountRoutes);
+app.use('/api/ledger-heads', protect, ledgerHeadRoutes);
+app.use('/api/monthly-ledger-balances', protect, monthlyLedgerBalanceRoutes);
+app.use('/api/donors', protect, donorRoutes);
+app.use('/api/booklets', protect, bookletRoutes);
+app.use('/api/transactions', protect, transactionRoutes);
+app.use('/api/cheques', protect, chequeRoutes);
+app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
+
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Global error:', err);
@@ -51,25 +74,6 @@ app.use((err, req, res, next) => {
         error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
 });
-
-// Root route
-app.get('/', (req, res) => {
-    res.send('IAFA Software API is running');
-});
-
-// Mount routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes); // Public user routes for debugging
-app.use('/api/admin/users', userRoutes); // Admin-only user routes
-app.use('/api/accounts', accountRoutes);
-app.use('/api/bank-accounts', bankAccountRoutes);
-app.use('/api/ledger-heads', ledgerHeadRoutes);
-app.use('/api/monthly-ledger-balances', monthlyLedgerBalanceRoutes);
-app.use('/api/donors', donorRoutes);
-app.use('/api/booklets', bookletRoutes);
-app.use('/api/transactions', transactionRoutes);
-app.use('/api/cheques', chequeRoutes);
-app.use('/api/monthly-closure', monthlyClosureRoutes);
 
 // 404 handler for undefined routes
 app.use((req, res) => {

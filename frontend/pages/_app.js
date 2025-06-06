@@ -17,7 +17,7 @@ const ToastContainer = dynamic(
 );
 
 // List of public routes that don't require authentication
-const publicRoutes = ['/auth/login', '/auth/forgot-password'];
+const publicRoutes = ['/auth/login', '/auth/register', '/auth/reset-password', '/auth/forgot-password', '/auth/debug-tools'];
 
 function AppContent({ Component, pageProps }) {
     const router = useRouter();
@@ -30,9 +30,13 @@ function AppContent({ Component, pageProps }) {
     // Special cases for certain pages
     const isChequeManagementPage = router.pathname === '/cheque-management';
     const isAuthPage = publicRoutes.includes(router.pathname);
+    const isHomePage = router.pathname === '/';
 
     // Handle authentication and redirects
     useEffect(() => {
+        // Skip redirect logic for home page as it handles its own redirects
+        if (isHomePage) return;
+
         // Only perform redirects when loading is complete
         if (!loading) {
             // Check if user is NOT authenticated and NOT on an auth page (like login)
@@ -48,21 +52,10 @@ function AppContent({ Component, pageProps }) {
                 setIsReady(true);
             }
         }
-    }, [user, loading, router.pathname, isAuthPage]);
-
-    // Ensure root path redirects to login if not authenticated or dashboard if authenticated
-    useEffect(() => {
-        if (!loading && router.pathname === '/') {
-            if (user) {
-                router.replace('/dashboard');
-            } else {
-                router.replace('/auth/login');
-            }
-        }
-    }, [loading, user, router.pathname]);
+    }, [user, loading, router.pathname, isAuthPage, isHomePage]);
 
     // Show loading state while checking authentication
-    if (loading || (!isReady && !isAuthPage)) {
+    if (loading || (!isReady && !isAuthPage && !isHomePage)) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -70,8 +63,8 @@ function AppContent({ Component, pageProps }) {
         );
     }
 
-    // Cheque management page gets no layout
-    if (isChequeManagementPage) {
+    // Home page, auth pages, and cheque management page don't need a layout wrapper
+    if (isHomePage || isChequeManagementPage) {
         return <Component {...pageProps} />;
     }
 

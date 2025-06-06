@@ -2,9 +2,9 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/auth/login": "pages/auth/login.js",
-  "/admin": "pages/admin.js",
-  "/dashboard": "pages/dashboard.js",
-  "/auth/debug-tools": "pages/auth/debug-tools.js",
-  "/auth/register": "pages/auth/register.js"
+  "/transactions": "pages/transactions.js",
+  "/ledger-snapshots": "pages/ledger-snapshots.js",
+  "/cheque-management": "pages/cheque-management.js",
+  "/accounts": "pages/accounts.js",
+  "/dashboard": "pages/dashboard.js"
 }

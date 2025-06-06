@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
+import Head from 'next/head';
 
 // Set page title
 Dashboard.pageTitle = 'Dashboard';
@@ -10,6 +11,9 @@ export default function Dashboard() {
 
     return (
         <ProtectedRoute requiredPermission="dashboard">
+            <Head>
+                <title>Dashboard | IAFA Software</title>
+            </Head>
             <div className="p-4 sm:p-6 lg:p-8">
                 <div className="mb-6">
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>

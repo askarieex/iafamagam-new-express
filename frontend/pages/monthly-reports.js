@@ -8,7 +8,9 @@ import {
     FaArrowRight,
     FaSearch,
     FaDownload,
-    FaExclamationCircle
+    FaExclamationCircle,
+    FaLock,
+    FaLockOpen
 } from 'react-icons/fa';
 import API_CONFIG from '../config';
 
@@ -20,6 +22,10 @@ export default function MonthlyReports() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [monthlyBalances, setMonthlyBalances] = useState([]);
+    const [periodStatus, setPeriodStatus] = useState({
+        isOpen: true,
+        lastClosedDate: null
+    });
     const [totals, setTotals] = useState({
         openingBalance: 0,
         receipts: 0,
@@ -38,6 +44,7 @@ export default function MonthlyReports() {
     useEffect(() => {
         if (selectedAccountId && selectedYear && selectedMonth) {
             fetchMonthlyBalances();
+            checkPeriodStatus();
         }
     }, [selectedAccountId, selectedYear, selectedMonth]);
 
@@ -58,6 +65,48 @@ export default function MonthlyReports() {
         } catch (err) {
             setError(err.response?.data?.message || err.message || 'An error occurred');
             toast.error('Error loading accounts');
+        }
+    };
+
+    // Check if the selected period is open or closed
+    const checkPeriodStatus = async () => {
+        try {
+            const response = await axios.get(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/status`
+            );
+
+            if (response.data.success) {
+                const accounts = response.data.data;
+                const selectedAccount = accounts.find(account => account.id === parseInt(selectedAccountId));
+
+                if (selectedAccount && selectedAccount.last_closed_date) {
+                    const lastClosedDate = new Date(selectedAccount.last_closed_date);
+                    const selectedDate = new Date(selectedYear, selectedMonth - 1, 1); // First day of selected month
+
+                    // If the last closed date is after or equal to the last day of the selected month, 
+                    // then the period is closed
+                    const lastDayOfSelectedMonth = new Date(selectedYear, selectedMonth, 0);
+                    const isOpen = lastClosedDate < lastDayOfSelectedMonth;
+
+                    setPeriodStatus({
+                        isOpen,
+                        lastClosedDate: selectedAccount.last_closed_date
+                    });
+                } else {
+                    // If no closed date, period is open
+                    setPeriodStatus({
+                        isOpen: true,
+                        lastClosedDate: null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Error checking period status:', err);
+            // Default to open if we can't determine
+            setPeriodStatus({
+                isOpen: true,
+                lastClosedDate: null
+            });
         }
     };
 
@@ -197,6 +246,17 @@ export default function MonthlyReports() {
         return monthNames[month - 1];
     };
 
+    // Format date for display
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-IN', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    };
+
     return (
         <div className="page-content-wrapper">
             <div className="w-full space-y-5 animate-fadeIn">
@@ -310,10 +370,33 @@ export default function MonthlyReports() {
                         {monthlyBalances.length > 0 ? (
                             <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
                                 <div className="px-4 py-4 bg-gray-50 dark:bg-secondary-800 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                                    <h2 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
-                                        <FaCalendarAlt className="mr-2" />
-                                        Monthly Report - {getMonthName(selectedMonth)} {selectedYear}
-                                    </h2>
+                                    <div className="flex items-center">
+                                        <h2 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+                                            <FaCalendarAlt className="mr-2" />
+                                            Monthly Report - {getMonthName(selectedMonth)} {selectedYear}
+                                        </h2>
+
+                                        {/* Period status indicator */}
+                                        <div className="ml-4">
+                                            {periodStatus.isOpen ? (
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    <FaLockOpen className="mr-1" />
+                                                    Period Open
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                                    <FaLock className="mr-1" />
+                                                    Period Closed
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {periodStatus.lastClosedDate && (
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                Last closed: {formatDate(periodStatus.lastClosedDate)}
+                                            </span>
+                                        )}
+                                    </div>
                                     <button
                                         className="flex-1 sm:flex-none px-3 py-2 text-xs bg-green-600 hover:bg-green-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
                                         onClick={exportToCsv}

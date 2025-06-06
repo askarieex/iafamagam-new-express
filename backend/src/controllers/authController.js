@@ -26,15 +26,11 @@ exports.register = async (req, res) => {
             });
         }
 
-        // Hash password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Create user
+        // Create user - password will be hashed by model hooks
         const user = await User.create({
             name,
             email,
-            password: hashedPassword,
+            password,
             role
         });
 
@@ -72,73 +68,6 @@ exports.login = async (req, res) => {
         const { email, password } = req.body;
         console.log(`Login attempt for: ${email}`);
 
-        // Special handling for admin login
-        if (email === 'admin@iafa.com' && password === 'admin123') {
-            console.log('Admin login detected, using direct credential check');
-
-            // Find or create admin user
-            let adminUser = await User.findOne({ where: { email: 'admin@iafa.com' } });
-
-            if (!adminUser) {
-                console.log('Creating admin user in database...');
-                // Create admin user if it doesn't exist
-                const salt = await bcrypt.genSalt(10);
-                const hashedPassword = await bcrypt.hash('admin123', salt);
-
-                adminUser = await User.create({
-                    name: 'Administrator',
-                    email: 'admin@iafa.com',
-                    password: hashedPassword,
-                    role: 'admin',
-                    permissions: {
-                        dashboard: true,
-                        transactions: true,
-                        reports: true,
-                        accounts: true,
-                        settings: true
-                    }
-                });
-                console.log('Admin user created successfully with ID:', adminUser.id);
-            } else {
-                console.log('Found existing admin user with ID:', adminUser.id);
-            }
-
-            // Generate token for admin
-            const token = jwt.sign(
-                {
-                    id: adminUser.id,
-                    name: adminUser.name,
-                    email: adminUser.email,
-                    role: 'admin'
-                },
-                JWT_SECRET,
-                { expiresIn: '30d' }
-            );
-
-            console.log('Admin login successful, returning token');
-
-            return res.json({
-                success: true,
-                data: {
-                    id: adminUser.id,
-                    name: adminUser.name,
-                    email: adminUser.email,
-                    role: 'admin',
-                    permissions: {
-                        dashboard: true,
-                        transactions: true,
-                        reports: true,
-                        accounts: true,
-                        settings: true
-                    },
-                    token
-                }
-            });
-        }
-
-        // Regular user login process
-        console.log('Processing regular user login');
-
         // Find user by email
         const user = await User.findOne({ where: { email } });
 
@@ -153,56 +82,39 @@ exports.login = async (req, res) => {
 
         console.log(`User found: ${user.name} (ID: ${user.id})`);
 
-        // Check password
-        console.log('Comparing password...');
-
-        // Use enhanced password comparison with detailed logging
-        const isMatch = await comparePasswords(password, user.password, user.id, user.email);
+        // Check password using the model's validatePassword method
+        const isMatch = await user.validatePassword(password);
+        console.log('Password validation completed with result:', isMatch);
 
         if (!isMatch) {
-            console.log('Password does not match');
             return res.status(401).json({
                 success: false,
                 message: 'Invalid credentials'
             });
         }
 
-        console.log('Password validated successfully');
-
-        // Create user data for token
-        const userData = {
+        // Create token payload
+        const tokenPayload = {
             id: user.id,
             name: user.name,
             email: user.email,
-            role: user.role,
-            permissions: user.permissions || {
-                dashboard: true,
-                transactions: false,
-                reports: false,
-                accounts: false,
-                settings: false
-            }
+            role: user.role || 'user'
         };
 
         // Generate token
-        const token = jwt.sign(
-            {
-                id: userData.id,
-                name: userData.name,
-                email: userData.email,
-                role: userData.role
-            },
-            JWT_SECRET,
-            { expiresIn: '30d' }
-        );
+        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 
-        console.log(`Login successful for user: ${userData.email} with role: ${userData.role}`);
+        console.log(`Login successful for user: ${user.email} with role: ${user.role}`);
 
         // Return successful response
         res.json({
             success: true,
             data: {
-                ...userData,
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                permissions: user.permissions,
                 token
             }
         });

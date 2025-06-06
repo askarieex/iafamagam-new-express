@@ -675,25 +675,53 @@ class TransactionService {
 
             // If it's a credit transaction and has a booklet, restore the receipt page
             if (transaction.tx_type === 'credit' && transaction.booklet_id && transaction.receipt_no) {
-                // Get the booklet
-                const booklet = await db.Booklet.findByPk(transaction.booklet_id, {
-                    transaction: t
-                });
+                try {
+                    // Get the booklet
+                    const booklet = await db.Booklet.findByPk(transaction.booklet_id, {
+                        transaction: t
+                    });
 
-                if (booklet) {
-                    // Restore the receipt page as available
-                    await db.BookletPage.update(
-                        { status: 'available' },
-                        {
-                            where: {
-                                booklet_id: transaction.booklet_id,
-                                page_no: transaction.receipt_no
-                            },
-                            transaction: t
+                    if (booklet) {
+                        // Check if BookletPage model exists
+                        if (db.BookletPage) {
+                            // Restore the receipt page as available
+                            await db.BookletPage.update(
+                                { status: 'available' },
+                                {
+                                    where: {
+                                        booklet_id: transaction.booklet_id,
+                                        page_no: transaction.receipt_no
+                                    },
+                                    transaction: t
+                                }
+                            );
+
+                            // Also update the booklet's pages_left count
+                            await booklet.update(
+                                {
+                                    pages_left: booklet.pages_left + 1
+                                },
+                                { transaction: t }
+                            );
+
+                            console.log(`Restored receipt page ${transaction.receipt_no} in booklet ${transaction.booklet_id}`);
+                        } else {
+                            // If BookletPage model doesn't exist, just update the booklet's pages_left
+                            await booklet.update(
+                                {
+                                    pages_left: booklet.pages_left + 1
+                                },
+                                { transaction: t }
+                            );
+
+                            console.log(`Updated booklet ${transaction.booklet_id} pages count, but BookletPage model not found`);
                         }
-                    );
-
-                    console.log(`Restored receipt page ${transaction.receipt_no} in booklet ${transaction.booklet_id}`);
+                    } else {
+                        console.log(`Booklet ${transaction.booklet_id} not found for transaction ${transaction.id}`);
+                    }
+                } catch (bookletError) {
+                    console.error('Error restoring booklet page:', bookletError);
+                    // Continue with transaction void even if booklet update fails
                 }
             }
 

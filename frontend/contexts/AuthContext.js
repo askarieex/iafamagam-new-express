@@ -83,12 +83,32 @@ export const AuthProvider = ({ children }) => {
             error => {
                 if (error.response && error.response.status === 401) {
                     // Token expired or invalid
-                    console.error('401 error detected, logging out user', error.response?.data);
+                    console.error('401 error detected:', error.response?.data);
 
                     // Only log out if the error is related to authentication
                     const errorMsg = error.response?.data?.message || '';
-                    if (errorMsg.includes('Not authorized') || errorMsg.includes('token')) {
-                        logout();
+                    if (
+                        errorMsg.includes('Authentication') ||
+                        errorMsg.includes('token') ||
+                        errorMsg.includes('expired') ||
+                        errorMsg.includes('Invalid')
+                    ) {
+                        console.log('Authentication error detected, logging out user');
+                        // Clear authentication data but don't redirect immediately if we're already on login page
+                        localStorage.removeItem('user');
+                        localStorage.removeItem('token');
+                        delete axios.defaults.headers.common['Authorization'];
+                        setUser(null);
+
+                        // Only redirect if not already on an auth page
+                        const currentPath = window.location.pathname;
+                        if (
+                            !currentPath.includes('/auth/login') &&
+                            !currentPath.includes('/auth/register') &&
+                            !currentPath.includes('/auth/reset-password')
+                        ) {
+                            router.push('/auth/login');
+                        }
                     }
                 }
                 return Promise.reject(error);
@@ -136,16 +156,16 @@ export const AuthProvider = ({ children }) => {
         try {
             console.log('Attempting login with:', email);
 
+            // Clear any previous auth data
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+            delete axios.defaults.headers.common['Authorization'];
+
             // For admin login, ensure we're using the right credentials
             if (email === 'admin@iafa.com') {
-                console.log('Admin login detected, ensuring correct formatting');
+                console.log('Admin login detected');
                 // Make sure email and password are correctly formatted
                 email = 'admin@iafa.com';
-                if (password === 'admin123') {
-                    console.log('Using standard admin credentials');
-                } else {
-                    console.log('Warning: Non-standard admin password provided');
-                }
             }
 
             // Make request to login endpoint
@@ -163,15 +183,24 @@ export const AuthProvider = ({ children }) => {
             }
 
             const { data } = response.data;
-            console.log('Login data:', { email: data.email, role: data.role });
 
-            // Verify the user has a role before saving
-            if (!data.role) {
-                console.error('Login response missing role!', data);
+            // Verify we have all required fields
+            if (!data.id || !data.email || !data.token) {
+                console.error('Login response missing required fields!', data);
                 throw new Error('Invalid user data received from server');
             }
 
-            console.log('Saving user with role:', data.role);
+            // Ensure role exists - default to 'user' if missing
+            if (!data.role) {
+                console.warn('User missing role, defaulting to "user"');
+                data.role = 'user';
+            }
+
+            console.log('Login successful:', {
+                id: data.id,
+                email: data.email,
+                role: data.role
+            });
 
             // Save user and token to localStorage
             localStorage.setItem('user', JSON.stringify(data));

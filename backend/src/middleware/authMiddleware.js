@@ -10,42 +10,57 @@ const JWT_SECRET = process.env.JWT_SECRET || 'iafa-jwt-secret-key';
 exports.protect = async (req, res, next) => {
     let token;
 
-    // Check if token is in headers
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-        // Extract token from Bearer token
-        token = req.headers.authorization.split(' ')[1];
-        
-        // Make sure token exists and is trimmed
-        if (token) {
-            token = token.trim();
-        }
-        
-        console.log('Token extracted from authorization header:', token ? `${token.substring(0, 15)}...` : 'none');
-    }
-    // Check if token is in cookies (alternative approach)
-    else if (req.cookies && req.cookies.token) {
-        token = req.cookies.token.trim();
-        console.log('Token extracted from cookies');
-    }
-
-    // Check if token exists
-    if (!token) {
-        console.log('No token provided in request');
-        return res.status(401).json({
-            success: false,
-            message: 'Not authorized, no token provided'
-        });
-    }
-
     try {
-        // Verify token
-        console.log('Verifying token...');
-        const decoded = jwt.verify(token, JWT_SECRET);
-        console.log('Token decoded successfully:', {
-            id: decoded.id,
-            email: decoded.email,
-            role: decoded.role
-        });
+        // Check if token is in headers
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            token = req.headers.authorization.split(' ')[1]?.trim();
+        }
+        // Check if token is in cookies (alternative approach)
+        else if (req.cookies && req.cookies.token) {
+            token = req.cookies.token.trim();
+        }
+
+        // Check if token exists
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required. Please log in.'
+            });
+        }
+
+        let decoded;
+        try {
+            // Verify token
+            decoded = jwt.verify(token, JWT_SECRET);
+        } catch (tokenError) {
+            // Handle token verification errors silently without full stack trace logging
+            if (tokenError.name === 'TokenExpiredError') {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Token has expired. Please log in again.'
+                });
+            } else if (tokenError.name === 'JsonWebTokenError') {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid token format'
+                });
+            } else {
+                // For other jwt errors, just log the error name
+                console.error('JWT Error:', tokenError.name);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication failed'
+                });
+            }
+        }
+
+        // Check if required fields exist in token
+        if (!decoded.id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid authentication token'
+            });
+        }
 
         // Get user from token
         const user = await User.findByPk(decoded.id, {
@@ -54,61 +69,61 @@ exports.protect = async (req, res, next) => {
 
         // Check if user exists
         if (!user) {
-            console.log(`User with ID ${decoded.id} not found in database`);
             return res.status(401).json({
                 success: false,
-                message: 'Not authorized, user not found'
+                message: 'User no longer exists'
             });
         }
-
-        console.log(`User found: ${user.name} (${user.email}), role: ${user.role}`);
 
         // Attach user to request object
         req.user = user;
         next();
     } catch (error) {
-        console.error('Auth middleware error:', error);
+        console.error('Auth middleware error:', error.message || error);
+
         return res.status(401).json({
             success: false,
-            message: 'Not authorized, invalid token'
+            message: 'Authentication failed'
         });
     }
 };
 
 /**
- * Middleware to check if user has required role
- * @param {string|string[]} roles - Role or array of roles allowed to access
+ * Middleware to check if user has required role or permission
+ * @param {string|string[]} rolesOrPermissions - Role or permission or array of roles/permissions allowed to access
  */
-exports.authorize = (roles) => {
+exports.authorize = (rolesOrPermissions) => {
     return (req, res, next) => {
         // Check if req.user exists (protect middleware should run first)
         if (!req.user) {
-            console.log('User not found in request - protect middleware might not have run');
             return res.status(401).json({
                 success: false,
                 message: 'Not authorized, please login'
             });
         }
 
-        // Convert roles to array if it's a single role
-        const allowedRoles = Array.isArray(roles) ? roles : [roles];
-
-        console.log('Authorize middleware checking roles:', {
-            userRole: req.user.role,
-            allowedRoles,
-            hasAccess: allowedRoles.includes(req.user.role)
-        });
+        // Convert to array if it's a single role/permission
+        const allowedValues = Array.isArray(rolesOrPermissions) ? rolesOrPermissions : [rolesOrPermissions];
 
         // Check if user role is in allowed roles
-        if (!allowedRoles.includes(req.user.role)) {
-            console.log(`Access denied: User role ${req.user.role} not in allowed roles [${allowedRoles.join(', ')}]`);
-            return res.status(403).json({
-                success: false,
-                message: `User role ${req.user.role} is not authorized to access this resource`
-            });
+        if (allowedValues.includes(req.user.role)) {
+            return next(); // If user has the required role, allow access
         }
 
-        console.log(`Access granted: User role ${req.user.role} has required permission`);
-        next();
+        // If user doesn't have the required role, check permissions
+        if (req.user.permissions) {
+            // Check if any of the required permissions match
+            for (const value of allowedValues) {
+                if (req.user.permissions[value] === true) {
+                    return next(); // User has the permission, allow access
+                }
+            }
+        }
+
+        // If we got here, user has neither the required role nor permission
+        return res.status(403).json({
+            success: false,
+            message: `Access denied: Requires ${allowedValues.join(' or ')} role or permission`
+        });
     };
 }; 

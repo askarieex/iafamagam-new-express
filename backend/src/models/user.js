@@ -57,14 +57,18 @@ module.exports = function (sequelize, DataTypes) {
         hooks: {
             beforeCreate: async (user) => {
                 if (user.password) {
+                    console.log('Hashing password for new user:', user.email);
                     const salt = await bcrypt.genSalt(10);
                     user.password = await bcrypt.hash(user.password, salt);
+                    console.log('Password hashed successfully for new user');
                 }
             },
             beforeUpdate: async (user) => {
                 if (user.changed('password')) {
+                    console.log('Hashing updated password for user:', user.email);
                     const salt = await bcrypt.genSalt(10);
                     user.password = await bcrypt.hash(user.password, salt);
+                    console.log('Password updated and hashed successfully');
                 }
             }
         }
@@ -72,7 +76,19 @@ module.exports = function (sequelize, DataTypes) {
 
     // Instance method to check if password matches
     User.prototype.validatePassword = async function (password) {
-        return await bcrypt.compare(password, this.password);
+        try {
+            console.log('Validating password for user:', this.email);
+            // Debug info
+            console.log('Stored hash length:', this.password.length);
+            console.log('Input password length:', password.length);
+            
+            const isValid = await bcrypt.compare(password, this.password);
+            console.log('Password validation result:', isValid ? 'VALID' : 'INVALID');
+            return isValid;
+        } catch (error) {
+            console.error('Error validating password:', error);
+            return false;
+        }
     };
 
     // Class method to find user by email

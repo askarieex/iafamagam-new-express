@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const transactionController = require('../controllers/transactionController');
-const { protect } = require('../middleware/authMiddleware');
-const { authorize } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 // Public routes - none
 
@@ -16,8 +15,8 @@ router.get('/balances/date', protect, transactionController.getBalancesForDate);
 router.get('/', protect, transactionController.getTransactions);
 router.get('/:id', protect, transactionController.getTransactionById);
 
-// Admin-only routes for sensitive operations
-router.put('/:id', protect, authorize('admin'), transactionController.updateTransaction);
-router.delete('/:id', protect, authorize('admin'), transactionController.voidTransaction);
+// Routes that require specific permissions
+router.put('/:id', protect, authorize(['admin', 'transactions']), transactionController.updateTransaction);
+router.delete('/:id', protect, authorize(['admin', 'transactions']), transactionController.voidTransaction);
 
 module.exports = router; 

@@ -83,15 +83,11 @@ exports.createUser = async (req, res) => {
             });
         }
 
-        // Hash password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Create user
+        // Create user - password will be hashed by model hooks
         const user = await User.create({
             name,
             email,
-            password: hashedPassword,
+            password,
             role: role || 'user',
             permissions: permissions || {
                 dashboard: true,
@@ -159,10 +155,9 @@ exports.updateUser = async (req, res) => {
         if (role) user.role = role;
         if (permissions) user.permissions = permissions;
 
-        // Hash password if provided
+        // Update password if provided - will be hashed by model hooks
         if (password) {
-            const salt = await bcrypt.genSalt(10);
-            user.password = await bcrypt.hash(password, salt);
+            user.password = password;
         }
 
         await user.save();
