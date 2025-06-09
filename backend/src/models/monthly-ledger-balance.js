@@ -84,6 +84,12 @@ module.exports = (sequelize) => {
             allowNull: false,
             defaultValue: 0.00
         },
+        is_open: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+            comment: 'Whether this period is currently open for transactions'
+        },
         created_at: {
             type: DataTypes.DATE,
             allowNull: false,
@@ -105,6 +111,14 @@ module.exports = (sequelize) => {
                 unique: true,
                 fields: ['account_id', 'ledger_head_id', 'month', 'year'],
                 name: 'monthly_ledger_balances_unique_constraint'
+            },
+            {
+                unique: true,
+                fields: ['account_id', 'is_open'],
+                name: 'one_open_period_per_account',
+                where: {
+                    is_open: true
+                }
             }
         ]
     });

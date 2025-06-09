@@ -11,6 +11,8 @@ const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
 const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 const reconciliationRoutes = require('./routes/reconciliationRoutes');
+const monthlyClosureController = require('./controllers/monthlyClosureController');
+const db = require('./models');
 // ... other route imports ...
 
 // API routes
@@ -39,3 +41,45 @@ app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
 app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
 app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes); 
+
+// Add this function before the app.listen call
+/**
+ * Initialize system startup tasks
+ */
+const runSystemStartupTasks = async () => {
+  try {
+    console.log('Running system startup tasks...');
+    
+    // 1. Auto-open current month for all active accounts if no period is open
+    const accounts = await db.Account.findAll({
+      where: { is_active: true }
+    });
+    
+    console.log(`Checking ${accounts.length} active accounts for open periods...`);
+    
+    for (const account of accounts) {
+      try {
+        const result = await monthlyClosureController.ensureCurrentPeriodOpen(account.id);
+        if (result.success && result.autoOpened) {
+          console.log(`Auto-opened period for account ${account.id} - ${account.name}`);
+        }
+      } catch (err) {
+        console.error(`Error auto-opening period for account ${account.id}:`, err);
+      }
+    }
+    
+    console.log('System startup tasks completed');
+  } catch (error) {
+    console.error('Error running system startup tasks:', error);
+  }
+};
+
+// Modify the app.listen call to run startup tasks first
+const PORT = process.env.PORT || 3001;
+db.sequelize.sync().then(() => {
+  runSystemStartupTasks().then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  });
+}); 

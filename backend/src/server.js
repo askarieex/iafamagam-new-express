@@ -6,6 +6,9 @@ const reconcileBalances = require('./jobs/reconcileBalances');
 const cookieParser = require('cookie-parser');
 const seedAdminUser = require('./seeders/adminUserSeeder');
 
+// Import controllers
+const monthlyClosureController = require('./controllers/monthlyClosureController');
+
 // Import routes
 const accountRoutes = require('./routes/accountRoutes');
 const bankAccountRoutes = require('./routes/bankAccountRoutes');
@@ -122,6 +125,35 @@ cron.schedule('0 2 * * *', async () => {
     }
 });
 
+/**
+ * Initialize system startup tasks
+ */
+const runSystemStartupTasks = async () => {
+    try {
+        console.log('Running system startup tasks...');
+
+        // 1. Auto-open current month for all accounts (removed is_active filter)
+        const accounts = await db.Account.findAll();
+
+        console.log(`Checking ${accounts.length} accounts for open periods...`);
+
+        for (const account of accounts) {
+            try {
+                const result = await monthlyClosureController.ensureCurrentPeriodOpen(account.id);
+                if (result.success && result.autoOpened) {
+                    console.log(`Auto-opened period for account ${account.id} - ${account.name}`);
+                }
+            } catch (err) {
+                console.error(`Error auto-opening period for account ${account.id}:`, err);
+            }
+        }
+
+        console.log('System startup tasks completed');
+    } catch (error) {
+        console.error('Error running system startup tasks:', error);
+    }
+};
+
 // Sync database and start server without dropping tables
 db.sequelize.sync()
     .then(async () => {
@@ -129,6 +161,9 @@ db.sequelize.sync()
 
         // Seed the default admin user
         await seedAdminUser();
+
+        // Run system startup tasks
+        await runSystemStartupTasks();
 
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);

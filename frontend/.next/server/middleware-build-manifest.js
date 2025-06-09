@@ -24,10 +24,10 @@ self.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/booklets.js"
     ],
-    "/cheque-management": [
+    "/donors": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/cheque-management.js"
+      "static/chunks/pages/donors.js"
     ],
     "/ledger-snapshots": [
       "static/chunks/webpack.js",

@@ -156,7 +156,7 @@ class BalanceCalculator {
         const creditsSum = await db.Transaction.sum('amount', {
             where: {
                 ...whereClause,
-                type: 'credit',
+                tx_type: 'credit',
                 ledger_head_id: ledgerHeadId
             },
             transaction
@@ -166,8 +166,8 @@ class BalanceCalculator {
         const debitsSum = await db.Transaction.sum('amount', {
             where: {
                 ...whereClause,
-                type: 'debit',
-                source_ledger_id: ledgerHeadId
+                tx_type: 'debit',
+                ledger_head_id: ledgerHeadId  // Using ledger_head_id instead of source_ledger_id
             },
             transaction
         });
@@ -277,6 +277,7 @@ class BalanceCalculator {
      * @returns {Promise<Object>} - Results of recalculation
      */
     static async recalculateMonthlySnapshots(accountId, ledgerHeadId, fromDate, transaction = null) {
+        console.log(`Recalculating snapshots for account ${accountId}, ledger ${ledgerHeadId} from ${fromDate}`);
         const fromDateObj = new Date(fromDate);
         const startMonth = fromDateObj.getMonth() + 1; // 1-12
         const startYear = fromDateObj.getFullYear();
@@ -287,6 +288,7 @@ class BalanceCalculator {
         const endYear = now.getFullYear();
 
         const results = [];
+        let previousMonthClosingBalance = null;
 
         // Start from the month of fromDate and iterate forward to current month
         let currentMonth = startMonth;
@@ -296,53 +298,110 @@ class BalanceCalculator {
             currentYear < endYear ||
             (currentYear === endYear && currentMonth <= endMonth)
         ) {
-            // Calculate opening balance
-            const openingBalance = await this.calculateOpeningBalance(
-                ledgerHeadId, accountId, currentMonth, currentYear, transaction
-            );
+            console.log(`Processing month ${currentMonth}/${currentYear}`);
 
-            // Calculate monthly activity
-            const { receipts, payments } = await this.calculateMonthlyActivity(
-                ledgerHeadId, accountId, currentMonth, currentYear, transaction
-            );
-
-            // Calculate closing balance
-            const closingBalance = openingBalance + receipts - payments;
-
-            // Update or create monthly snapshot
-            const [monthlySnapshot, created] = await db.MonthlyLedgerBalance.findOrCreate({
+            // Get the monthly snapshot for this month
+            let snapshot = await db.MonthlyLedgerBalance.findOne({
                 where: {
-                    ledger_head_id: ledgerHeadId,
                     account_id: accountId,
+                    ledger_head_id: ledgerHeadId,
                     month: currentMonth,
                     year: currentYear
-                },
-                defaults: {
-                    opening_balance: openingBalance,
-                    receipts,
-                    payments,
-                    closing_balance: closingBalance
                 },
                 transaction
             });
 
-            if (!created) {
-                await monthlySnapshot.update({
-                    opening_balance: openingBalance,
-                    receipts,
-                    payments,
-                    closing_balance: closingBalance
-                }, { transaction });
+            // Calculate opening balance
+            let openingBalance;
+
+            if (previousMonthClosingBalance !== null) {
+                // Use previous month's closing balance for continuity
+                openingBalance = previousMonthClosingBalance;
+                console.log(`Using previous month's closing balance: ${openingBalance}`);
+            } else if (currentMonth === startMonth && currentYear === startYear) {
+                // First month in sequence - calculate from prior transactions
+                openingBalance = await this.calculateBalanceFromTransactions(
+                    ledgerHeadId, accountId, null, fromDateObj, transaction
+                );
+                console.log(`Calculated first month opening balance: ${openingBalance}`);
+            } else {
+                // Standard opening balance calculation
+                openingBalance = await this.calculateOpeningBalance(
+                    ledgerHeadId, accountId, currentMonth, currentYear, transaction
+                );
+                console.log(`Calculated opening balance: ${openingBalance}`);
             }
 
-            results.push({
-                month: currentMonth,
-                year: currentYear,
-                openingBalance,
-                receipts,
-                payments,
-                closingBalance
-            });
+            // Calculate monthly activity for this month
+            const { receipts, payments } = await this.calculateMonthlyActivity(
+                ledgerHeadId,
+                accountId,
+                currentMonth,
+                currentYear,
+                transaction
+            );
+            console.log(`Calculated receipts: ${receipts}, payments: ${payments}`);
+
+            // Calculate closing balance
+            const closingBalance = parseFloat(openingBalance) + parseFloat(receipts) - parseFloat(payments);
+            console.log(`New closing balance: ${closingBalance}`);
+
+            // Store for next iteration (this is the key improvement)
+            previousMonthClosingBalance = closingBalance;
+
+            if (snapshot) {
+                // Update existing snapshot
+                const isOpen = snapshot.is_open;
+
+                await snapshot.update({
+                    opening_balance: openingBalance,
+                    receipts: receipts,
+                    payments: payments,
+                    closing_balance: closingBalance,
+                    is_open: isOpen // Preserve the open status
+                }, { transaction });
+
+                results.push({
+                    month: currentMonth,
+                    year: currentYear,
+                    opening_balance: parseFloat(openingBalance),
+                    receipts: parseFloat(receipts),
+                    payments: parseFloat(payments),
+                    closing_balance: closingBalance,
+                    updated: true
+                });
+            } else {
+                // Create new snapshot if it doesn't exist
+                console.log(`No snapshot exists for ${currentMonth}/${currentYear} - creating one`);
+
+                // Determine if this should be the open period (current month/year)
+                const isCurrentMonth = (currentMonth === now.getMonth() + 1 && currentYear === now.getFullYear());
+
+                // Create new snapshot
+                snapshot = await db.MonthlyLedgerBalance.create({
+                    account_id: accountId,
+                    ledger_head_id: ledgerHeadId,
+                    month: currentMonth,
+                    year: currentYear,
+                    opening_balance: openingBalance,
+                    receipts: receipts,
+                    payments: payments,
+                    closing_balance: closingBalance,
+                    is_open: isCurrentMonth, // Only open if it's the current month
+                    cash_in_hand: 0,
+                    cash_in_bank: 0
+                }, { transaction });
+
+                results.push({
+                    month: currentMonth,
+                    year: currentYear,
+                    opening_balance: parseFloat(openingBalance),
+                    receipts: parseFloat(receipts),
+                    payments: parseFloat(payments),
+                    closing_balance: closingBalance,
+                    created: true
+                });
+            }
 
             // Move to next month
             if (currentMonth === 12) {

@@ -1,18 +1,73 @@
 const transactionService = require('../services/transactionService');
 const db = require('../models');
+const monthlyClosureService = require('../services/monthlyClosureService');
 
 /**
- * Validates if a transaction date is in a closed period
+ * Validates if a transaction date is in a closed period or if it's outside the open period
  * @param {*} account The account object
  * @param {*} txDate Transaction date string (YYYY-MM-DD)
  * @param {*} adminOverride Whether admin override is specified
  */
-const validateClosedPeriod = (account, txDate, adminOverride = false) => {
-    // If no last closed date, no validation needed
+const validateTransactionPeriod = async (account, txDate, adminOverride = false) => {
+    // If no last closed date, check if there's an open period
     if (!account.last_closed_date) {
-        return { allowed: true };
+        // Even without a last_closed_date, we need to check for open period
+        const openPeriod = await monthlyClosureService.getOpenPeriodForAccount(account.id);
+
+        if (!openPeriod) {
+            // No open period exists yet, check if it's current month
+            const txDateObj = new Date(txDate);
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth() + 1;
+            const currentYear = currentDate.getFullYear();
+
+            // If it's current month, auto-open it and allow the transaction
+            if (txDateObj.getMonth() === currentDate.getMonth() &&
+                txDateObj.getFullYear() === currentDate.getFullYear()) {
+
+                try {
+                    // Auto-open the current month since we're allowing transactions in it
+                    await monthlyClosureService.openAccountingPeriod(
+                        currentMonth,
+                        currentYear,
+                        account.id
+                    );
+                    console.log(`Auto-opened period ${currentMonth}/${currentYear} for account ${account.id}`);
+                } catch (error) {
+                    console.error('Failed to auto-open period:', error);
+                    // Continue allowing the transaction even if auto-open fails
+                }
+
+                return { allowed: true };
+            }
+
+            // For past or future months, require opening the period first
+            return {
+                allowed: false,
+                message: `No open accounting period exists. Please open a period first before entering transactions.`
+            };
+        }
+
+        // Check if transaction is within the open period
+        const txDateObj = new Date(txDate);
+        const txMonth = txDateObj.getMonth() + 1; // Convert from 0-based to 1-based
+        const txYear = txDateObj.getFullYear();
+
+        if (openPeriod.month === txMonth && openPeriod.year === txYear) {
+            return { allowed: true };
+        }
+
+        if (adminOverride) {
+            return { allowed: true, requiresRecalculation: true, warning: 'Transaction is outside open period but allowed with admin override.' };
+        }
+
+        return {
+            allowed: false,
+            message: `Transaction date must be within the open period (${openPeriod.month}/${openPeriod.year}).`
+        };
     }
 
+    // If there is a last_closed_date, check both closed and open periods
     const txDateObj = new Date(txDate);
     const lastClosedDateObj = new Date(account.last_closed_date);
 
@@ -23,7 +78,7 @@ const validateClosedPeriod = (account, txDate, adminOverride = false) => {
     // Check if transaction is in or before a closed period
     if (txDateObj <= lastClosedDateObj) {
         if (adminOverride) {
-            return { allowed: true, requiresRecalculation: true };
+            return { allowed: true, requiresRecalculation: true, warning: 'Transaction date is in a closed period but allowed with admin override.' };
         }
         return {
             allowed: false,
@@ -31,28 +86,58 @@ const validateClosedPeriod = (account, txDate, adminOverride = false) => {
         };
     }
 
-    // Calculate the maximum allowed transaction date
-    // This enforces only one open period at a time (next month after last closed)
+    // Get the open period
+    const openPeriod = await monthlyClosureService.getOpenPeriodForAccount(account.id);
+    if (!openPeriod) {
+        // This should generally not happen if last_closed_date is set
+        // Check if it's current month
+        const txDateObj = new Date(txDate);
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth() + 1;
+        const currentYear = currentDate.getFullYear();
 
-    // Get the month after the last closed date
-    const maxAllowedDateObj = new Date(lastClosedDateObj);
-    maxAllowedDateObj.setMonth(maxAllowedDateObj.getMonth() + 2, 0); // Last day of next month
+        // If it's current month, auto-open it and allow the transaction
+        if (txDateObj.getMonth() === currentDate.getMonth() &&
+            txDateObj.getFullYear() === currentDate.getFullYear()) {
 
-    // Check if transaction is beyond the allowed open period
-    if (txDateObj > maxAllowedDateObj) {
-        if (adminOverride) {
-            return { allowed: true };
+            try {
+                // Auto-open the current month since we're allowing transactions in it
+                await monthlyClosureService.openAccountingPeriod(
+                    currentMonth,
+                    currentYear,
+                    account.id
+                );
+                console.log(`Auto-opened period ${currentMonth}/${currentYear} for account ${account.id}`);
+
+                // Return the newly created period
+                return { allowed: true };
+            } catch (error) {
+                console.error('Failed to auto-open period:', error);
+            }
         }
 
         return {
             allowed: false,
-            message: `Cannot enter transactions for future periods. Only one open period is allowed at a time. ` +
-                `You can only enter transactions until ${maxAllowedDateObj.toISOString().split('T')[0]}.`
+            message: `No open accounting period exists. Please open a period first before entering transactions.`
         };
     }
 
-    // Transaction is within allowed open period
-    return { allowed: true };
+    // Check if transaction is within the open period
+    const txMonth = txDateObj.getMonth() + 1; // Convert from 0-based to 1-based
+    const txYear = txDateObj.getFullYear();
+
+    if (openPeriod.month === txMonth && openPeriod.year === txYear) {
+        return { allowed: true };
+    }
+
+    if (adminOverride) {
+        return { allowed: true, requiresRecalculation: true, warning: 'Transaction is outside open period but allowed with admin override.' };
+    }
+
+    return {
+        allowed: false,
+        message: `Transaction date must be within the open period (${openPeriod.month}/${openPeriod.year}).`
+    };
 };
 
 /**
@@ -90,24 +175,24 @@ class TransactionController {
                 });
             }
 
-            // Validate against closed period
-            const closedPeriodCheck = validateClosedPeriod(
+            // Validate against transaction period rules
+            const periodCheck = await validateTransactionPeriod(
                 account,
                 creditData.tx_date,
                 creditData.admin_override
             );
 
-            if (!closedPeriodCheck.allowed) {
+            if (!periodCheck.allowed) {
                 await t.rollback();
                 return res.status(403).json({
                     success: false,
-                    message: closedPeriodCheck.message
+                    message: periodCheck.message
                 });
             }
 
             // If there's a warning, log it but allow the transaction
-            if (closedPeriodCheck.warning) {
-                console.warn(`Admin override for closed period: ${closedPeriodCheck.warning}`);
+            if (periodCheck.warning) {
+                console.warn(`Admin override for transaction period: ${periodCheck.warning}`);
             }
 
             const transaction = await transactionService.createCredit(creditData);
@@ -117,12 +202,9 @@ class TransactionController {
             const today = new Date();
             const isBackdated = txDateObj < today;
 
-            // Recalculate monthly snapshots if the transaction is backdated
-            // This ensures all periods maintain balance consistency
-            if (isBackdated) {
+            // Recalculate monthly snapshots if the transaction is backdated or requires recalculation
+            if (isBackdated || periodCheck.requiresRecalculation) {
                 try {
-                    const monthlyClosureService = require('../services/monthlyClosureService');
-
                     await monthlyClosureService.recalculateMonthlySnapshots(
                         creditData.account_id,
                         creditData.ledger_head_id,
@@ -139,7 +221,8 @@ class TransactionController {
             return res.status(201).json({
                 success: true,
                 data: transaction,
-                message: 'Credit transaction created successfully'
+                message: 'Credit transaction created successfully',
+                warning: periodCheck.warning
             });
         } catch (error) {
             await t.rollback();
@@ -183,24 +266,24 @@ class TransactionController {
                 });
             }
 
-            // Validate against closed period
-            const closedPeriodCheck = validateClosedPeriod(
+            // Validate against transaction period rules
+            const periodCheck = await validateTransactionPeriod(
                 account,
                 debitData.tx_date,
                 debitData.admin_override
             );
 
-            if (!closedPeriodCheck.allowed) {
+            if (!periodCheck.allowed) {
                 await t.rollback();
                 return res.status(403).json({
                     success: false,
-                    message: closedPeriodCheck.message
+                    message: periodCheck.message
                 });
             }
 
             // If there's a warning, log it but allow the transaction
-            if (closedPeriodCheck.warning) {
-                console.warn(`Admin override for closed period: ${closedPeriodCheck.warning}`);
+            if (periodCheck.warning) {
+                console.warn(`Admin override for transaction period: ${periodCheck.warning}`);
             }
 
             const transaction = await transactionService.createDebit(debitData);
@@ -210,12 +293,9 @@ class TransactionController {
             const today = new Date();
             const isBackdated = txDateObj < today;
 
-            // Recalculate monthly snapshots if the transaction is backdated 
-            // This ensures all periods maintain balance consistency
-            if (isBackdated) {
+            // Recalculate monthly snapshots if the transaction is backdated or requires recalculation
+            if (isBackdated || periodCheck.requiresRecalculation) {
                 try {
-                    const monthlyClosureService = require('../services/monthlyClosureService');
-
                     // Recalculate for the target ledger head
                     await monthlyClosureService.recalculateMonthlySnapshots(
                         debitData.account_id,
@@ -242,7 +322,8 @@ class TransactionController {
             return res.status(201).json({
                 success: true,
                 data: transaction,
-                message: 'Debit transaction created successfully'
+                message: 'Debit transaction created successfully',
+                warning: periodCheck.warning
             });
         } catch (error) {
             await t.rollback();

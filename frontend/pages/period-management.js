@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FaLock, FaUnlock, FaCalendarAlt, FaChevronDown, FaChevronUp, FaHistory, FaChartLine, FaFileAlt, FaSyncAlt } from 'react-icons/fa';
+import { FaLock, FaUnlock, FaCalendarAlt, FaChevronDown, FaChevronUp, FaHistory, FaChartLine, FaFileAlt, FaSyncAlt, FaLockOpen } from 'react-icons/fa';
 import Layout from '../components/Layout';
 import AccountClosureStatus from '../components/accounts/AccountClosureStatus';
 import axios from 'axios';
@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import API_CONFIG from '../config';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import PeriodStatusBadge from '../components/reports/PeriodStatusBadge';
 
 export default function PeriodManagement() {
     const [activeTab, setActiveTab] = useState('status');
@@ -18,6 +19,7 @@ export default function PeriodManagement() {
     const [loading, setLoading] = useState(false);
     const [ledgerSnapshots, setLedgerSnapshots] = useState([]);
     const [periodHistory, setPeriodHistory] = useState([]);
+    const [openPeriod, setOpenPeriod] = useState(null);
     const { user } = useAuth();
     const router = useRouter();
 
@@ -33,6 +35,13 @@ export default function PeriodManagement() {
         fetchAccounts();
     }, []);
 
+    // Fetch current open period when account changes
+    useEffect(() => {
+        if (selectedAccount) {
+            fetchOpenPeriod();
+        }
+    }, [selectedAccount]);
+
     // Fetch ledger snapshots when account, year or month changes
     useEffect(() => {
         if (selectedAccount && activeTab === 'snapshots') {
@@ -47,13 +56,40 @@ export default function PeriodManagement() {
         }
     }, [selectedAccount, activeTab]);
 
+    // Fetch open period for the selected account
+    const fetchOpenPeriod = async () => {
+        if (!selectedAccount) return;
+
+        try {
+            const response = await axios.get(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open-period`,
+                { params: { account_id: selectedAccount.id } }
+            );
+
+            if (response.data.success && response.data.data) {
+                setOpenPeriod(response.data.data);
+                // Auto-select the open period month and year
+                setSelectedMonth(response.data.data.month);
+                setSelectedYear(response.data.data.year);
+            } else {
+                setOpenPeriod(null);
+                // If no open period, default to current month/year
+                setSelectedMonth(new Date().getMonth() + 1);
+                setSelectedYear(new Date().getFullYear());
+            }
+        } catch (error) {
+            console.error('Error fetching open period:', error);
+            setOpenPeriod(null);
+        }
+    };
+
     const fetchAccounts = async () => {
         try {
             setLoading(true);
             const response = await axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/status`);
             if (response.data.success) {
                 setAccounts(response.data.data || []);
-                
+
                 // If account ID is in URL params, pre-select it
                 if (router.query.accountId) {
                     const accountId = parseInt(router.query.accountId);
@@ -138,7 +174,8 @@ export default function PeriodManagement() {
             if (response.data.success) {
                 toast.success(`Period ${months[selectedMonth - 1]} ${selectedYear} closed successfully`);
                 fetchAccounts(); // Refresh account list to show updated last_closed_date
-                
+                fetchOpenPeriod(); // Refresh open period status
+
                 if (activeTab === 'history') {
                     fetchPeriodHistory();
                 }
@@ -146,6 +183,58 @@ export default function PeriodManagement() {
         } catch (error) {
             console.error('Error closing period:', error);
             toast.error(error.response?.data?.message || 'Failed to close period');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleOpenPeriod = async () => {
+        if (!selectedAccount) {
+            toast.error('Please select an account');
+            return;
+        }
+
+        // Check if the selected period is already open
+        if (openPeriod &&
+            openPeriod.month === selectedMonth &&
+            openPeriod.year === selectedYear) {
+            toast.info('This period is already open');
+            return;
+        }
+
+        const message = openPeriod
+            ? `This will close the currently open period (${months[openPeriod.month - 1]} ${openPeriod.year}) and open ${months[selectedMonth - 1]} ${selectedYear}. Continue?`
+            : `Are you sure you want to open ${months[selectedMonth - 1]} ${selectedYear} for ${selectedAccount.name}?`;
+
+        if (!window.confirm(message)) {
+            return;
+        }
+
+        try {
+            setLoading(true);
+            const response = await axios.post(`${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open`, {
+                account_id: selectedAccount.id,
+                month: selectedMonth,
+                year: selectedYear
+            });
+
+            if (response.data.success) {
+                toast.success(`Period ${months[selectedMonth - 1]} ${selectedYear} opened successfully`);
+
+                if (response.data.warning) {
+                    toast.info(response.data.warning);
+                }
+
+                fetchOpenPeriod(); // Refresh open period status
+                fetchAccounts(); // Refresh account list
+
+                if (activeTab === 'history') {
+                    fetchPeriodHistory();
+                }
+            }
+        } catch (error) {
+            console.error('Error opening period:', error);
+            toast.error(error.response?.data?.message || 'Failed to open period');
         } finally {
             setLoading(false);
         }
@@ -176,14 +265,13 @@ export default function PeriodManagement() {
             <h2 className="text-lg font-semibold mb-2">Select Account</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                 {accounts.map(account => (
-                    <div 
+                    <div
                         key={account.id}
                         onClick={() => setSelectedAccount(account)}
-                        className={`p-3 border rounded-md cursor-pointer transition-all ${
-                            selectedAccount?.id === account.id 
-                                ? 'bg-blue-50 border-blue-500' 
-                                : 'hover:bg-gray-50'
-                        }`}
+                        className={`p-3 border rounded-md cursor-pointer transition-all ${selectedAccount?.id === account.id
+                            ? 'bg-blue-50 border-blue-500'
+                            : 'hover:bg-gray-50'
+                            }`}
                     >
                         <div className="font-medium">{account.name}</div>
                         <div className="flex justify-between items-center mt-1">
@@ -192,8 +280,8 @@ export default function PeriodManagement() {
                             </span>
                             <span className={`text-xs px-2 py-1 rounded-full ${getStatusBadgeColor(account.status)}`}>
                                 {account.status === 'never_closed' ? 'Never Closed' :
-                                 account.status === 'current' ? 'Current' :
-                                 account.status === 'recent' ? 'Recent' : 'Outdated'}
+                                    account.status === 'current' ? 'Current' :
+                                        account.status === 'recent' ? 'Recent' : 'Outdated'}
                             </span>
                         </div>
                     </div>
@@ -203,17 +291,33 @@ export default function PeriodManagement() {
     );
 
     const renderPeriodClosureControls = () => (
-        <div className="mb-6">
-            <h2 className="text-lg font-semibold mb-3">Period Closure Controls</h2>
+        <div className="mt-3 p-4 bg-white rounded shadow-sm">
+            <h5 className="border-bottom pb-2 mb-4">Period Management</h5>
+            
             {selectedAccount ? (
-                <div className="bg-white p-4 rounded-md border">
-                    <div className="flex flex-col md:flex-row gap-4">
-                        <div>
+                <>
+                    <div className="alert alert-info mb-4">
+                        <h6 className="mb-2">Current Status:</h6>
+                        {openPeriod ? (
+                            <div>
+                                <span className="badge bg-success me-2">OPEN</span>
+                                <strong>{months[openPeriod.month - 1]} {openPeriod.year}</strong> is currently open for {selectedAccount?.name}
+                            </div>
+                        ) : (
+                            <div>
+                                <span className="badge bg-danger me-2">CLOSED</span>
+                                No period is currently open for {selectedAccount?.name}
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="row">
+                        <div className="col-md-6">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
                             <div className="p-2 bg-gray-100 rounded">{selectedAccount.name}</div>
                         </div>
-                        
-                        <div>
+
+                        <div className="col-md-6">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
                             <select
                                 className="border rounded p-2 w-full"
@@ -225,8 +329,8 @@ export default function PeriodManagement() {
                                 ))}
                             </select>
                         </div>
-                        
-                        <div>
+
+                        <div className="col-md-6">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
                             <select
                                 className="border rounded p-2 w-full"
@@ -238,11 +342,20 @@ export default function PeriodManagement() {
                                 ))}
                             </select>
                         </div>
-                        
-                        <div className="self-end">
+
+                        <div className="col-md-6 self-end flex gap-2">
+                            <button
+                                onClick={handleOpenPeriod}
+                                disabled={loading || (openPeriod?.month === selectedMonth && openPeriod?.year === selectedYear)}
+                                className="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 flex items-center gap-1 disabled:bg-green-400"
+                            >
+                                <FaLockOpen className="mr-1" />
+                                {loading ? 'Processing...' : 'Open Period'}
+                            </button>
+
                             <button
                                 onClick={handleClosePeriod}
-                                disabled={loading}
+                                disabled={loading || !(openPeriod?.month === selectedMonth && openPeriod?.year === selectedYear)}
                                 className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 flex items-center gap-1 disabled:bg-blue-400"
                             >
                                 <FaLock className="mr-1" />
@@ -250,25 +363,11 @@ export default function PeriodManagement() {
                             </button>
                         </div>
                     </div>
-                    
-                    <div className="mt-4 p-3 bg-gray-50 rounded border">
-                        <h3 className="font-medium mb-2">Period Status</h3>
-                        <div>
-                            <span className="font-semibold">Last Closed Date:</span> {formatDate(selectedAccount.last_closed_date)}
-                        </div>
-                        <div className="mt-1">
-                            <span className="font-semibold">Status:</span>{' '}
-                            <span className={`px-2 py-1 rounded-full text-sm ${getStatusBadgeColor(selectedAccount.status)}`}>
-                                {selectedAccount.status === 'never_closed' ? 'Never Closed' :
-                                 selectedAccount.status === 'current' ? 'Current' :
-                                 selectedAccount.status === 'recent' ? 'Recent' : 'Outdated'}
-                            </span>
-                        </div>
-                    </div>
-                </div>
+                </>
             ) : (
-                <div className="bg-yellow-50 p-4 rounded-md border border-yellow-200 text-yellow-700">
-                    Please select an account to continue
+                <div className="alert alert-warning">
+                    <h6>No Account Selected</h6>
+                    <p>Please select an account to manage its periods.</p>
                 </div>
             )}
         </div>
@@ -277,7 +376,7 @@ export default function PeriodManagement() {
     const renderLedgerSnapshots = () => (
         <div className="mb-6">
             <h2 className="text-lg font-semibold mb-3">Monthly Ledger Snapshots</h2>
-            
+
             {selectedAccount ? (
                 <>
                     <div className="bg-white p-4 rounded-md border mb-4">
@@ -294,7 +393,7 @@ export default function PeriodManagement() {
                                     ))}
                                 </select>
                             </div>
-                            
+
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
                                 <select
@@ -307,7 +406,7 @@ export default function PeriodManagement() {
                                     ))}
                                 </select>
                             </div>
-                            
+
                             <div className="self-end">
                                 <button
                                     onClick={fetchLedgerSnapshots}
@@ -399,7 +498,7 @@ export default function PeriodManagement() {
     const renderPeriodHistory = () => (
         <div className="mb-6">
             <h2 className="text-lg font-semibold mb-3">Period Closure History</h2>
-            
+
             {selectedAccount ? (
                 loading ? (
                     <div className="text-center p-8">
@@ -423,12 +522,12 @@ export default function PeriodManagement() {
                                         <td className="py-2 px-4 border">
                                             <span className={
                                                 log.action === 'CLOSE_PERIOD' ? 'bg-blue-100 text-blue-800' :
-                                                log.action === 'REOPEN_PERIOD' ? 'bg-yellow-100 text-yellow-800' :
-                                                'bg-gray-100 text-gray-800'
-                                            + ' px-2 py-1 rounded text-sm'}>
+                                                    log.action === 'REOPEN_PERIOD' ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-gray-100 text-gray-800'
+                                                        + ' px-2 py-1 rounded text-sm'}>
                                                 {log.action === 'CLOSE_PERIOD' ? 'Close Period' :
-                                                 log.action === 'REOPEN_PERIOD' ? 'Reopen Period' :
-                                                 log.action === 'FORCE_CLOSE_PERIOD' ? 'Force Close' : log.action}
+                                                    log.action === 'REOPEN_PERIOD' ? 'Reopen Period' :
+                                                        log.action === 'FORCE_CLOSE_PERIOD' ? 'Force Close' : log.action}
                                             </span>
                                         </td>
                                         <td className="py-2 px-4 border">{log.details}</td>
@@ -457,7 +556,7 @@ export default function PeriodManagement() {
     const renderDocumentation = () => (
         <div className="bg-white p-6 rounded-md border">
             <h2 className="text-lg font-semibold mb-4">Period Management Documentation</h2>
-            
+
             <div className="space-y-4">
                 <div>
                     <h3 className="text-md font-semibold">Single Period Open at a Time</h3>
@@ -467,15 +566,15 @@ export default function PeriodManagement() {
                         and prevents accidental backdated entries.
                     </p>
                 </div>
-                
+
                 <div>
                     <h3 className="text-md font-semibold">Automatic Balance Update</h3>
                     <p className="text-gray-600">
-                        When a period is closed, its closing balance automatically becomes the 
+                        When a period is closed, its closing balance automatically becomes the
                         opening balance for the next period. This ensures continuity in your financial records.
                     </p>
                 </div>
-                
+
                 <div>
                     <h3 className="text-md font-semibold">Backdated Transactions</h3>
                     <p className="text-gray-600">
@@ -484,16 +583,16 @@ export default function PeriodManagement() {
                         subsequent period balances to maintain accuracy.
                     </p>
                 </div>
-                
+
                 <div>
                     <h3 className="text-md font-semibold">Period Reopening</h3>
                     <p className="text-gray-600">
-                        In special cases, administrators can reopen a previously closed period by 
+                        In special cases, administrators can reopen a previously closed period by
                         adjusting the last_closed_date. This should be done only when necessary
                         as it allows backdated transactions to be entered again.
                     </p>
                 </div>
-                
+
                 <div className="bg-blue-50 p-4 rounded border border-blue-200">
                     <h3 className="text-md font-semibold text-blue-800">Best Practices</h3>
                     <ul className="list-disc list-inside text-gray-600 space-y-1 mt-2">
@@ -561,7 +660,7 @@ export default function PeriodManagement() {
                     ) : (
                         <>
                             {activeTab !== 'docs' && renderAccountSelector()}
-                            
+
                             {activeTab === 'status' && renderPeriodClosureControls()}
                             {activeTab === 'snapshots' && renderLedgerSnapshots()}
                             {activeTab === 'history' && renderPeriodHistory()}

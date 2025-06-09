@@ -9,6 +9,12 @@ router.get('/status', protect, monthlyClosureController.getClosureStatus);
 // Close an accounting period
 router.post('/close', protect, authorize('admin'), monthlyClosureController.closeAccountingPeriod);
 
+// Open a specific accounting period (will close any currently open periods)
+router.post('/open', protect, authorize('admin'), monthlyClosureController.openAccountingPeriod);
+
+// Get the currently open period for an account
+router.get('/open-period', protect, monthlyClosureController.getOpenPeriod);
+
 // Force close current month for a specific account
 router.post('/force-close-current', protect, authorize('admin'), monthlyClosureController.forceCloseCurrentMonth);
 

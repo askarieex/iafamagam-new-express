@@ -114,40 +114,39 @@ export default function LedgerSnapshots() {
     // Fetch period closure status
     const fetchPeriodStatuses = async () => {
         try {
-            const response = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/status`
+            // First, get the currently open period for this account
+            const openPeriodResponse = await axios.get(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open-period`,
+                {
+                    params: {
+                        account_id: selectedAccountId
+                    }
+                }
             );
 
-            if (response.data.success) {
-                const accounts = response.data.data;
-                const selectedAccount = accounts.find(account => account.id === parseInt(selectedAccountId));
-
-                if (selectedAccount && selectedAccount.last_closed_date) {
-                    const lastClosedDate = new Date(selectedAccount.last_closed_date);
-                    const statuses = {};
-
-                    // For each month in the selected year, determine if it's open or closed
-                    for (let month = 1; month <= 12; month++) {
-                        const lastDayOfMonth = new Date(selectedYear, month, 0);
-                        statuses[month] = lastClosedDate < lastDayOfMonth;
-                    }
-
-                    setPeriodStatuses(statuses);
-                } else {
-                    // If no closed date, all periods are open
-                    const statuses = {};
-                    for (let month = 1; month <= 12; month++) {
-                        statuses[month] = true;
-                    }
-                    setPeriodStatuses(statuses);
-                }
-            }
-        } catch (err) {
-            console.error('Error checking period status:', err);
-            // Default to open if we can't determine
+            // Set all periods to closed by default
             const statuses = {};
             for (let month = 1; month <= 12; month++) {
-                statuses[month] = true;
+                statuses[month] = false; // Default all to closed
+            }
+
+            // If we have an open period, mark only that one as open
+            if (openPeriodResponse.data.success && openPeriodResponse.data.data) {
+                const openPeriod = openPeriodResponse.data.data;
+
+                // Check if the open period is in the selected year
+                if (openPeriod.year === selectedYear) {
+                    statuses[openPeriod.month] = true; // Only this period is open
+                }
+            }
+
+            setPeriodStatuses(statuses);
+        } catch (err) {
+            console.error('Error checking period status:', err);
+            // Default all to closed if we can't determine
+            const statuses = {};
+            for (let month = 1; month <= 12; month++) {
+                statuses[month] = false;
             }
             setPeriodStatuses(statuses);
         }
