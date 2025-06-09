@@ -96,14 +96,14 @@ class BalanceCalculator {
         // Use raw SQL query for performance
         const [result] = await sequelize.query(`
             SELECT 
-                COALESCE(SUM(CASE WHEN t.type = 'credit' THEN t.amount ELSE 0 END), 0) as receipts,
-                COALESCE(SUM(CASE WHEN t.type = 'debit' THEN t.amount ELSE 0 END), 0) as payments
+                COALESCE(SUM(CASE WHEN t.tx_type = 'credit' THEN t.amount ELSE 0 END), 0) as receipts,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'debit' THEN t.amount ELSE 0 END), 0) as payments
             FROM transactions t
             WHERE t.account_id = :accountId
                 AND (
-                    (t.type = 'credit' AND t.ledger_head_id = :ledgerHeadId) 
+                    (t.tx_type = 'credit' AND t.ledger_head_id = :ledgerHeadId) 
                     OR 
-                    (t.type = 'debit' AND t.source_ledger_id = :ledgerHeadId)
+                    (t.tx_type = 'debit' AND t.ledger_head_id = :ledgerHeadId)
                 )
                 AND t.tx_date BETWEEN :startDate AND :endDate
                 AND t.status = 'completed'
@@ -288,7 +288,11 @@ class BalanceCalculator {
         const endYear = now.getFullYear();
 
         const results = [];
-        let previousMonthClosingBalance = null;
+        let totalDelta = 0; // Track the total delta for audit logging
+
+        // Track original values for audit logging
+        let originalFirstMonthClosing = null;
+        let newFirstMonthClosing = null;
 
         // Start from the month of fromDate and iterate forward to current month
         let currentMonth = startMonth;
@@ -311,25 +315,44 @@ class BalanceCalculator {
                 transaction
             });
 
-            // Calculate opening balance
-            let openingBalance;
+            // Store original closing value of first month for delta calculation
+            if (currentMonth === startMonth && currentYear === startYear && snapshot) {
+                originalFirstMonthClosing = parseFloat(snapshot.closing_balance);
+            }
 
-            if (previousMonthClosingBalance !== null) {
-                // Use previous month's closing balance for continuity
-                openingBalance = previousMonthClosingBalance;
-                console.log(`Using previous month's closing balance: ${openingBalance}`);
+            // Calculate previous month/year for chronological ordering
+            let monthForPrev = currentMonth > 1 ? currentMonth - 1 : 12;
+            let yearForPrev = currentMonth > 1 ? currentYear : currentYear - 1;
+
+            // Get previous month's snapshot to seed opening balance
+            const prev = await db.MonthlyLedgerBalance.findOne({
+                where: { 
+                    account_id: accountId, 
+                    ledger_head_id: ledgerHeadId,
+                    year: yearForPrev, 
+                    month: monthForPrev 
+                },
+                transaction
+            });
+
+            // Calculate opening balance - use previous month's closing balance if available
+            let openingBalance;
+            
+            if (prev) {
+                // Use the chronological previous month's closing balance
+                openingBalance = parseFloat(prev.closing_balance);
+                console.log(`Using previous month's closing balance as opening: ${openingBalance}`);
             } else if (currentMonth === startMonth && currentYear === startYear) {
-                // First month in sequence - calculate from prior transactions
+                // For the first month in the calculation sequence, use transactions before this month
+                const firstDayOfMonth = new Date(currentYear, currentMonth - 1, 1);
                 openingBalance = await this.calculateBalanceFromTransactions(
-                    ledgerHeadId, accountId, null, fromDateObj, transaction
+                    ledgerHeadId, accountId, null, firstDayOfMonth, transaction
                 );
-                console.log(`Calculated first month opening balance: ${openingBalance}`);
+                console.log(`Calculated opening balance from prior transactions: ${openingBalance}`);
             } else {
-                // Standard opening balance calculation
-                openingBalance = await this.calculateOpeningBalance(
-                    ledgerHeadId, accountId, currentMonth, currentYear, transaction
-                );
-                console.log(`Calculated opening balance: ${openingBalance}`);
+                // No previous snapshot and not the first month - use 0 as default
+                openingBalance = 0;
+                console.log(`No previous month data available, using 0 as opening balance`);
             }
 
             // Calculate monthly activity for this month
@@ -346,8 +369,10 @@ class BalanceCalculator {
             const closingBalance = parseFloat(openingBalance) + parseFloat(receipts) - parseFloat(payments);
             console.log(`New closing balance: ${closingBalance}`);
 
-            // Store for next iteration (this is the key improvement)
-            previousMonthClosingBalance = closingBalance;
+            // Store new closing value of first month for delta calculation
+            if (currentMonth === startMonth && currentYear === startYear) {
+                newFirstMonthClosing = closingBalance;
+            }
 
             if (snapshot) {
                 // Update existing snapshot
@@ -424,12 +449,42 @@ class BalanceCalculator {
             }, { transaction });
         }
 
+        // Calculate the delta for audit logging
+        if (originalFirstMonthClosing !== null && newFirstMonthClosing !== null) {
+            totalDelta = newFirstMonthClosing - originalFirstMonthClosing;
+        }
+
+        // Log the recalculation for audit purposes
+        if (db.AuditLog) {
+            try {
+                await db.AuditLog.create({
+                    action: 'periodRecalculated',
+                    entity_type: 'MonthlyLedgerBalance',
+                    entity_id: `${accountId}_${ledgerHeadId}`,
+                    details: JSON.stringify({
+                        fromMonth: startMonth,
+                        fromYear: startYear,
+                        accountId,
+                        ledgerHeadId,
+                        delta: totalDelta.toFixed(2),
+                        recalculatedMonths: results.length
+                    }),
+                    created_at: new Date()
+                }, { transaction });
+                console.log(`Audit log created for balance recalculation, delta: ${totalDelta.toFixed(2)}`);
+            } catch (error) {
+                console.error('Failed to create audit log for balance recalculation:', error);
+                // Don't fail the transaction just because audit logging failed
+            }
+        }
+
         return {
             accountId,
             ledgerHeadId,
             fromDate,
             recalculatedMonths: results.length,
-            months: results
+            months: results,
+            delta: totalDelta
         };
     }
 }

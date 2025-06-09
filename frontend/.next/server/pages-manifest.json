@@ -2,9 +2,8 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/transactions": "pages/transactions.js",
-  "/donors": "pages/donors.js",
-  "/booklets": "pages/booklets.js",
   "/ledger-snapshots": "pages/ledger-snapshots.js",
-  "/period-management": "pages/period-management.js"
+  "/period-management": "pages/period-management.js",
+  "/transactions": "pages/transactions.js",
+  "/manage-ledger": "pages/manage-ledger.js"
 }

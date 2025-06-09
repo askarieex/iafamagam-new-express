@@ -1,6 +1,6 @@
-const { Op } = require('sequelize');
 const db = require('../models');
-const { sequelize } = db;
+const sequelize = db.sequelize;
+const { Op } = require('sequelize');
 
 /**
  * Transaction Service - handles all transaction-related operations
@@ -904,11 +904,10 @@ class TransactionService {
                 }, { transaction });
 
                 console.log(`Created new monthly balance for ${month}/${year} with opening ${openingBalance}`);
-            } catch (err) {
-                // Handle race condition where another transaction might have created this record
-                if (err.name === 'SequelizeUniqueConstraintError') {
-                    console.log(`Race condition detected - another process created the monthly balance for ${month}/${year}`);
-                    // Try to fetch the record again
+            } catch (error) {
+                // Handle race condition - if another process created this record concurrently
+                if (error.name === 'SequelizeUniqueConstraintError') {
+                    console.log(`Monthly balance for ${month}/${year} already exists, retrieving...`);
                     monthlyBalance = await db.MonthlyLedgerBalance.findOne({
                         where: {
                             account_id: ledgerHead.account_id,
@@ -916,16 +915,10 @@ class TransactionService {
                             month,
                             year
                         },
-                        transaction,
-                        lock: true
+                        transaction
                     });
-
-                    if (!monthlyBalance) {
-                        throw new Error(`Failed to create or find monthly balance for ${month}/${year}`);
-                    }
                 } else {
-                    // Re-throw if it's not a unique constraint error
-                    throw err;
+                    throw error;
                 }
             }
         } else {
@@ -959,6 +952,174 @@ class TransactionService {
 
             console.log(`Updated monthly balance for ${month}/${year}: opening=${openingBalance}, receipts=${newReceipts}, payments=${newPayments}, closing=${newClosingBalance}`);
         }
+
+        // Check if this transaction is backdated (earlier than the current open period)
+        // If so, recalculate all subsequent monthly snapshots
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth() + 1;
+        const currentYear = currentDate.getFullYear();
+
+        // Transaction is backdated if its year is less than current year,
+        // or if it's the same year but an earlier month
+        const isBackdated = (year < currentYear) || (year === currentYear && month < currentMonth);
+
+        if (isBackdated) {
+            try {
+                console.log(`Transaction is backdated (${month}/${year}), recalculating subsequent monthly snapshots`);
+                const BalanceCalculator = require('../utils/balanceCalculator');
+
+                // Get the account details for logging
+                const account = await db.Account.findByPk(ledgerHead.account_id, {
+                    transaction,
+                    attributes: ['name']
+                });
+
+                const ledgerHeadDetails = await db.LedgerHead.findByPk(ledgerHeadId, {
+                    transaction,
+                    attributes: ['name']
+                });
+
+                console.log(`Recalculating balances for account ${account ? account.name : ledgerHead.account_id}, ledger head ${ledgerHeadDetails ? ledgerHeadDetails.name : ledgerHeadId}`);
+
+                // Recalculate from the first day of the transaction month
+                const recalcResult = await BalanceCalculator.recalculateMonthlySnapshots(
+                    ledgerHead.account_id,
+                    ledgerHeadId,
+                    new Date(txDateObj.getFullYear(), txDateObj.getMonth(), 1),
+                    transaction
+                );
+
+                console.log(`Balance recalculation complete. Delta: ${recalcResult.delta}, Affected months: ${recalcResult.recalculatedMonths}`);
+
+                // Once recalculation is complete, make sure all periods except the current one are marked as closed
+                // This ensures only the current period remains open after backdated changes
+                if (recalcResult.recalculatedMonths > 0) {
+                    try {
+                        await this.ensureOnlyCurrentPeriodOpen(ledgerHead.account_id, transaction, true);
+                    } catch (periodLockError) {
+                        console.error('Error ensuring only current period is open:', periodLockError);
+                        // Continue with the transaction - this is not critical enough to fail the whole process
+                    }
+                }
+            } catch (recalcError) {
+                console.error('Error during balance recalculation:', recalcError);
+                // Log the error but don't block the transaction - the base transaction should still go through
+                // We can fix any inconsistencies later with the reconciliation job
+            }
+        }
+    }
+
+    /**
+     * Ensure that only one accounting period is marked as open
+     * @param {number} accountId - The account ID
+     * @param {Transaction} transaction - Sequelize transaction
+     * @param {boolean} [preserveUserOpenPeriod=true] - Whether to preserve the user's manually opened period
+     * @returns {Promise<void>}
+     */
+    async ensureOnlyCurrentPeriodOpen(accountId, transaction, preserveUserOpenPeriod = true) {
+        // Get the current date for default calculation
+        const currentDate = new Date();
+        const calendarMonth = currentDate.getMonth() + 1;
+        const calendarYear = currentDate.getFullYear();
+
+        // If we need to preserve the user's open period, find it first
+        let targetMonth = calendarMonth;
+        let targetYear = calendarYear;
+
+        if (preserveUserOpenPeriod) {
+            try {
+                // Find the currently open period for this account
+                const openPeriod = await db.MonthlyLedgerBalance.findOne({
+                    where: {
+                        account_id: accountId,
+                        is_open: true
+                    },
+                    order: [['year', 'DESC'], ['month', 'DESC']],
+                    transaction
+                });
+
+                // If found, use this period instead of the calendar period
+                if (openPeriod) {
+                    targetMonth = openPeriod.month;
+                    targetYear = openPeriod.year;
+                    console.log(`Found user's open period: ${targetMonth}/${targetYear}, will preserve it`);
+                }
+            } catch (error) {
+                console.error('Error finding user open period:', error);
+                // Fall back to calendar month/year
+            }
+        }
+
+        console.log(`Ensuring only period ${targetMonth}/${targetYear} is open for account ${accountId}`);
+
+        try {
+            // First, close ALL periods for this account to avoid constraint violations
+            await db.MonthlyLedgerBalance.update(
+                { is_open: false },
+                {
+                    where: {
+                        account_id: accountId,
+                        is_open: true
+                    },
+                    transaction
+                }
+            );
+
+            // Now, find the target period for the first ledger head
+            const targetPeriod = await db.MonthlyLedgerBalance.findOne({
+                where: {
+                    account_id: accountId,
+                    month: targetMonth,
+                    year: targetYear,
+                    ledger_head_id: {
+                        [Op.in]: sequelize.literal(`(SELECT id FROM ledger_heads WHERE account_id = ${accountId} ORDER BY id LIMIT 1)`)
+                    }
+                },
+                transaction
+            });
+
+            // If we found the target period, open it
+            if (targetPeriod) {
+                await targetPeriod.update({ is_open: true }, { transaction });
+                console.log(`Opened period ${targetMonth}/${targetYear} for account ${accountId}`);
+            } else {
+                // This means the period doesn't exist yet for the ledger head
+                console.log(`Target period ${targetMonth}/${targetYear} not found for account ${accountId}`);
+
+                // Get the first ledger head for the account
+                const firstLedgerHead = await db.LedgerHead.findOne({
+                    where: { account_id: accountId },
+                    order: [['id', 'ASC']],
+                    transaction
+                });
+
+                if (!firstLedgerHead) {
+                    throw new Error(`No ledger heads found for account ${accountId}`);
+                }
+
+                // Create the period and set it as open
+                await db.MonthlyLedgerBalance.create({
+                    account_id: accountId,
+                    ledger_head_id: firstLedgerHead.id,
+                    month: targetMonth,
+                    year: targetYear,
+                    opening_balance: 0,
+                    receipts: 0,
+                    payments: 0,
+                    closing_balance: 0,
+                    cash_in_hand: 0,
+                    cash_in_bank: 0,
+                    is_open: true
+                }, { transaction });
+
+                console.log(`Created and opened new period ${targetMonth}/${targetYear} for account ${accountId}`);
+            }
+        } catch (error) {
+            console.error(`Error ensuring period ${targetMonth}/${targetYear} is open for account ${accountId}:`, error);
+            throw error;
+        }
+
+        console.log(`Period locking complete for account ${accountId}, keeping ${targetMonth}/${targetYear} open`);
     }
 
     /**

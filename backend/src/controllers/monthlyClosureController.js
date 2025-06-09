@@ -700,72 +700,111 @@ exports.ensureCurrentPeriodOpen = async (accountId) => {
  * Manual fallback to open a period directly with raw SQL if the ORM method fails
  */
 async function manuallyOpenPeriod(accountId, month, year) {
-    try {
-        console.log(`Attempting manual period open for ${month}/${year}, account ${accountId}`);
+    console.log(`Manually opening period for account ${accountId}, ${month}/${year}`);
 
-        // Close any existing open periods first
-        await db.sequelize.query(
-            `UPDATE monthly_ledger_balances SET is_open = false WHERE account_id = ? AND is_open = true`,
-            { replacements: [accountId] }
-        );
+    // Get all ledger heads for this account
+    const ledgerHeads = await db.LedgerHead.findAll({
+        where: { account_id: accountId }
+    });
 
-        // Get ledger heads for this account
-        const ledgerHeads = await db.LedgerHead.findAll({
-            where: { account_id: accountId },
-            raw: true
+    if (!ledgerHeads || ledgerHeads.length === 0) {
+        throw new Error(`No ledger heads found for account ${accountId}`);
+    }
+
+    // The first ledger head will be set as the "open" one
+    let isFirstLedger = true;
+
+    for (const ledger of ledgerHeads) {
+        // Only the first ledger gets is_open=true
+        const isOpen = isFirstLedger;
+
+        // Check if period exists
+        const existingPeriod = await db.MonthlyLedgerBalance.findOne({
+            where: {
+                account_id: accountId,
+                ledger_head_id: ledger.id,
+                month: month,
+                year: year
+            }
         });
 
-        // For each ledger head, create or update the monthly snapshot
-        let isFirstLedger = true;
+        if (existingPeriod) {
+            // Update existing period - only set is_open=true for first ledger
+            await db.sequelize.query(
+                `UPDATE monthly_ledger_balances SET is_open = ? 
+                     WHERE account_id = ? AND ledger_head_id = ? AND month = ? AND year = ?`,
+                { replacements: [isOpen, accountId, ledger.id, month, year] }
+            );
+        } else {
+            // Calculate the previous month and year
+            const prevMonth = month === 1 ? 12 : month - 1;
+            const prevYear = month === 1 ? year - 1 : year;
 
-        for (const ledger of ledgerHeads) {
-            // Only the first ledger gets is_open=true
-            const isOpen = isFirstLedger;
-
-            // Check if period exists
-            const existingPeriod = await db.MonthlyLedgerBalance.findOne({
+            // Find previous month's record to get closing balance
+            const prevRecord = await db.MonthlyLedgerBalance.findOne({
                 where: {
                     account_id: accountId,
                     ledger_head_id: ledger.id,
-                    month: month,
-                    year: year
+                    month: prevMonth,
+                    year: prevYear
                 }
             });
 
-            if (existingPeriod) {
-                // Update existing period - only set is_open=true for first ledger
-                await db.sequelize.query(
-                    `UPDATE monthly_ledger_balances SET is_open = ? 
-                     WHERE account_id = ? AND ledger_head_id = ? AND month = ? AND year = ?`,
-                    { replacements: [isOpen, accountId, ledger.id, month, year] }
-                );
+            // Use previous month's closing balance or calculate from transactions
+            let openingBalance = 0;
+
+            if (prevRecord) {
+                // Use previous month's closing balance
+                openingBalance = parseFloat(prevRecord.closing_balance);
+                console.log(`Using previous month's closing balance: ${openingBalance}`);
             } else {
-                // Create new period with opening = closing = current balance
-                await db.sequelize.query(
-                    `INSERT INTO monthly_ledger_balances 
-                     (account_id, ledger_head_id, month, year, opening_balance, receipts, payments, closing_balance, is_open, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, NOW(), NOW())`,
-                    {
-                        replacements: [
-                            accountId,
-                            ledger.id,
-                            month,
-                            year,
-                            ledger.current_balance || 0,
-                            ledger.current_balance || 0,
-                            isOpen
-                        ]
-                    }
-                );
+                // Calculate from transactions prior to this month
+                const startDate = new Date(year, month - 1, 1);
+                const startDateStr = startDate.toISOString().split('T')[0];
+
+                const priorTransactions = await db.sequelize.query(`
+                    SELECT SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE -ti.amount END) as balance
+                    FROM transaction_items ti
+                    JOIN transactions t ON ti.transaction_id = t.id
+                    WHERE ti.ledger_head_id = :ledgerHeadId 
+                    AND t.tx_date < :startDate
+                    AND t.status = 'completed'
+                `, {
+                    replacements: {
+                        ledgerHeadId: ledger.id,
+                        startDate: startDateStr
+                    },
+                    type: db.Sequelize.QueryTypes.SELECT
+                });
+
+                if (priorTransactions && priorTransactions[0] && priorTransactions[0].balance !== null) {
+                    openingBalance = parseFloat(priorTransactions[0].balance || 0);
+                    console.log(`Calculated opening balance from historical transactions: ${openingBalance}`);
+                }
             }
 
-            // After processing the first ledger, set this to false for the rest
-            isFirstLedger = false;
+            // Create new period with proper opening balance
+            await db.sequelize.query(
+                `INSERT INTO monthly_ledger_balances 
+                     (account_id, ledger_head_id, month, year, opening_balance, receipts, payments, closing_balance, is_open, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, NOW(), NOW())`,
+                {
+                    replacements: [
+                        accountId,
+                        ledger.id,
+                        month,
+                        year,
+                        openingBalance,
+                        openingBalance, // Initial closing balance equals opening since no activity yet
+                        isOpen
+                    ]
+                }
+            );
         }
 
-        console.log('Manual period open completed');
-    } catch (error) {
-        console.error('Error in manual period open:', error);
-        throw error;
+        // After processing the first ledger, set this to false for the rest
+        isFirstLedger = false;
     }
+
+    console.log('Manual period open completed');
 } 
