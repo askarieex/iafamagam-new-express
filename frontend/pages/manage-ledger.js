@@ -289,11 +289,11 @@ export default function ManageLedger() {
 
     const totalDebitBalance = ledgerHeads
         .filter(head => head.head_type === 'debit')
-        .reduce((sum, head) => sum + parseFloat(head.current_balance || 0), 0);
+        .reduce((sum, head) => sum + parseFloat(head.cash_balance || 0) + parseFloat(head.bank_balance || 0), 0);
 
     const totalCreditBalance = ledgerHeads
         .filter(head => head.head_type === 'credit')
-        .reduce((sum, head) => sum + parseFloat(head.current_balance || 0), 0);
+        .reduce((sum, head) => sum + parseFloat(head.cash_balance || 0) + parseFloat(head.bank_balance || 0), 0);
 
     const totalCashBalance = ledgerHeads
         .reduce((sum, head) => sum + parseFloat(head.cash_balance || 0), 0);
@@ -378,9 +378,9 @@ export default function ManageLedger() {
                                             <th>NAME</th>
                                             <th>ACCOUNT</th>
                                             <th>TYPE</th>
-                                            <th>TOTAL</th>
-                                            <th>CASH</th>
-                                            <th>BANK</th>
+                                            <th className="dynamic-header">AMOUNT/BALANCE</th>
+                                            <th>CASH <span className="credit-only">(Credit Only)</span></th>
+                                            <th>BANK <span className="credit-only">(Credit Only)</span></th>
                                             <th>DESCRIPTION</th>
                                             <th>ACTIONS</th>
                                         </tr>
@@ -404,18 +404,29 @@ export default function ManageLedger() {
                                                             {ledgerHead.head_type}
                                                         </span>
                                                     </td>
-                                                    <td className="balance">
-                                                        {formatCurrency(ledgerHead.current_balance)}
+                                                    <td className={`${ledgerHead.head_type === 'debit' ? 'amount' : 'balance'}`}>
+                                                        <span className="value-label">{ledgerHead.head_type === 'debit' ? 'Amount' : 'Balance'}:</span>
+                                                        {formatCurrency(parseFloat(ledgerHead.cash_balance || 0) + parseFloat(ledgerHead.bank_balance || 0))}
                                                     </td>
                                                     <td className="balance">
-                                                        <span className="cash-badge">
-                                                            {formatCurrency(ledgerHead.cash_balance)}
-                                                        </span>
+                                                        {ledgerHead.head_type === 'credit' && (
+                                                            <span className="cash-badge">
+                                                                {formatCurrency(ledgerHead.cash_balance)}
+                                                            </span>
+                                                        )}
+                                                        {ledgerHead.head_type === 'debit' && (
+                                                            <span className="n/a-badge">N/A</span>
+                                                        )}
                                                     </td>
                                                     <td className="balance">
-                                                        <span className="bank-badge">
-                                                            {formatCurrency(ledgerHead.bank_balance)}
-                                                        </span>
+                                                        {ledgerHead.head_type === 'credit' && (
+                                                            <span className="bank-badge">
+                                                                {formatCurrency(ledgerHead.bank_balance)}
+                                                            </span>
+                                                        )}
+                                                        {ledgerHead.head_type === 'debit' && (
+                                                            <span className="n/a-badge">N/A</span>
+                                                        )}
                                                     </td>
                                                     <td className="description">{ledgerHead.description || 'N/A'}</td>
                                                     <td className="actions">
@@ -463,9 +474,13 @@ export default function ManageLedger() {
                             </div>
                             <div className="stat-item total-balance">
                                 <div className="stat-label">Net Balance</div>
-                                <div className={`stat-value ${totalDebitBalance - totalCreditBalance >= 0 ? 'positive' : 'negative'}`}>
-                                    {formatCurrency(totalDebitBalance - totalCreditBalance)}
+                                <div className={`stat-value ${totalCreditBalance - totalDebitBalance >= 0 ? 'positive' : 'negative'}`}>
+                                    {formatCurrency(totalCreditBalance - totalDebitBalance)}
                                 </div>
+                            </div>
+                            <div className="stat-item">
+                                <div className="stat-label">Total Expenses</div>
+                                <div className="stat-value expense-total">{formatCurrency(totalDebitBalance)}</div>
                             </div>
                             <div className="stat-item">
                                 <div className="stat-label"><FaMoneyBillWave className="mr-1" /> Cash Balance</div>

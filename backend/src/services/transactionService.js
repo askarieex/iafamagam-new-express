@@ -789,6 +789,9 @@ class TransactionService {
             throw new Error(`Ledger head ID ${ledgerHeadId} not found`);
         }
 
+        // Determine if this is a debit or credit ledger head
+        const isDebitHead = ledgerHead.head_type === 'debit';
+
         // Parse date components for the monthly snapshot
         const txDateObj = new Date(txDate);
         const month = txDateObj.getMonth() + 1; // 1-12
@@ -830,183 +833,162 @@ class TransactionService {
             transaction
         });
 
-        // If no monthly balance exists, we need to create one with proper opening balance
+        // If no monthly balance exists, we need to create one
         if (!monthlyBalance) {
-            // First, determine the opening balance from the previous month
-            let openingBalance = 0;
-
-            // If not January, check previous month of same year
-            let prevMonth, prevYear;
-
-            if (month > 1) {
-                prevMonth = month - 1;
-                prevYear = year;
-            } else {
-                // If January, check December of previous year
-                prevMonth = 12;
-                prevYear = year - 1;
-            }
-
-            // Find previous month's record
-            const prevRecord = await db.MonthlyLedgerBalance.findOne({
-                where: {
+            // For debit ledger heads, we only track expenses, not balances
+            if (isDebitHead) {
+                // Create with zero balances, just track receipts/payments
+                monthlyBalance = await db.MonthlyLedgerBalance.create({
                     account_id: ledgerHead.account_id,
                     ledger_head_id: ledgerHeadId,
-                    month: prevMonth,
-                    year: prevYear
-                },
-                transaction
-            });
+                    month,
+                    year,
+                    opening_balance: 0, // Always zero for debit heads
+                    receipts: side === '+' ? amount : 0,
+                    payments: side === '-' ? amount : 0,
+                    closing_balance: 0, // Always zero for debit heads
+                    is_open: false,
+                    cash_in_hand: 0,
+                    cash_in_bank: 0
+                }, { transaction });
 
-            if (prevRecord) {
-                openingBalance = parseFloat(prevRecord.closing_balance);
-                console.log(`Using previous month's closing balance as opening: ${openingBalance}`);
+                console.log(`Created new debit head snapshot for ${ledgerHeadId} with zero balances`);
             } else {
-                // If no previous month record, calculate from transactions prior to this month
-                const startDate = new Date(year, month - 1, 1);
-                const startDateStr = startDate.toISOString().split('T')[0];
+                // For credit heads, determine the opening balance from previous month
+                let openingBalance = 0;
 
-                const priorTransactions = await sequelize.query(`
-                    SELECT SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE -ti.amount END) as balance
-                    FROM transaction_items ti
-                    JOIN transactions t ON ti.transaction_id = t.id
-                    WHERE ti.ledger_head_id = :ledgerHeadId 
-                    AND t.tx_date < :startDate
-                    AND t.status = 'completed'
-                `, {
-                    replacements: {
-                        ledgerHeadId: ledgerHeadId,
-                        startDate: startDateStr
+                // If not January, check previous month of same year
+                let prevMonth, prevYear;
+
+                if (month > 1) {
+                    prevMonth = month - 1;
+                    prevYear = year;
+                } else {
+                    // If January, check December of previous year
+                    prevMonth = 12;
+                    prevYear = year - 1;
+                }
+
+                // Find previous month's record
+                const prevRecord = await db.MonthlyLedgerBalance.findOne({
+                    where: {
+                        account_id: ledgerHead.account_id,
+                        ledger_head_id: ledgerHeadId,
+                        month: prevMonth,
+                        year: prevYear
                     },
-                    type: sequelize.QueryTypes.SELECT,
                     transaction
                 });
 
-                if (priorTransactions && priorTransactions[0] && priorTransactions[0].balance !== null) {
-                    openingBalance = parseFloat(priorTransactions[0].balance || 0);
-                    console.log(`Calculated opening balance from historical transactions: ${openingBalance}`);
-                }
-            }
+                if (prevRecord) {
+                    openingBalance = parseFloat(prevRecord.closing_balance);
+                    console.log(`Using previous month's closing balance as opening: ${openingBalance}`);
+                } else {
+                    // If no previous month record, calculate from transactions prior to this month
+                    const startDate = new Date(year, month - 1, 1);
+                    const startDateStr = startDate.toISOString().split('T')[0];
 
-            // Create the monthly balance with correct opening balance - use try/catch for race condition protection
-            try {
+                    const priorTransactions = await sequelize.query(`
+                        SELECT SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE -ti.amount END) as balance
+                        FROM transaction_items ti
+                        JOIN transactions t ON ti.transaction_id = t.id
+                        WHERE ti.ledger_head_id = :ledgerHeadId 
+                        AND t.tx_date < :startDate
+                        AND t.status = 'completed'
+                    `, {
+                        replacements: {
+                            ledgerHeadId: ledgerHeadId,
+                            startDate: startDateStr
+                        },
+                        type: sequelize.QueryTypes.SELECT,
+                        transaction
+                    });
+
+                    if (priorTransactions && priorTransactions[0] && priorTransactions[0].balance !== null) {
+                        openingBalance = parseFloat(priorTransactions[0].balance || 0);
+                        console.log(`Calculated opening balance from historical transactions: ${openingBalance}`);
+                    }
+                }
+
+                // Calculate closing balance based on the new transaction
+                const closingBalance = openingBalance + (side === '+' ? parseFloat(amount) : -parseFloat(amount));
+
+                // Create the monthly balance record
                 monthlyBalance = await db.MonthlyLedgerBalance.create({
                     account_id: ledgerHead.account_id,
                     ledger_head_id: ledgerHeadId,
                     month,
                     year,
                     opening_balance: openingBalance,
-                    receipts: side === '+' ? parseFloat(amount) : 0,
-                    payments: side === '-' ? parseFloat(amount) : 0,
-                    closing_balance: openingBalance + (side === '+' ? parseFloat(amount) : -parseFloat(amount)),
-                    cash_in_hand: side === '+' ? parseFloat(cashAmount) : -parseFloat(cashAmount),
-                    cash_in_bank: side === '+' ? parseFloat(bankAmount) : -parseFloat(bankAmount)
+                    receipts: side === '+' ? amount : 0,
+                    payments: side === '-' ? amount : 0,
+                    closing_balance: closingBalance,
+                    is_open: false,
+                    cash_in_hand: side === '+' ? cashAmount : 0,
+                    cash_in_bank: side === '+' ? bankAmount : 0
                 }, { transaction });
 
-                console.log(`Created new monthly balance for ${month}/${year} with opening ${openingBalance}`);
-            } catch (error) {
-                // Handle race condition - if another process created this record concurrently
-                if (error.name === 'SequelizeUniqueConstraintError') {
-                    console.log(`Monthly balance for ${month}/${year} already exists, retrieving...`);
-                    monthlyBalance = await db.MonthlyLedgerBalance.findOne({
-                        where: {
-                            account_id: ledgerHead.account_id,
-                            ledger_head_id: ledgerHeadId,
-                            month,
-                            year
-                        },
-                        transaction
-                    });
-                } else {
-                    throw error;
-                }
+                console.log(`Created new credit head monthly balance with opening: ${openingBalance}, closing: ${closingBalance}`);
             }
         } else {
-            // Update monthly balance receipts/payments and closing
-            let newReceipts = parseFloat(monthlyBalance.receipts);
-            let newPayments = parseFloat(monthlyBalance.payments);
-            let newCashInHand = parseFloat(monthlyBalance.cash_in_hand);
-            let newCashInBank = parseFloat(monthlyBalance.cash_in_bank);
+            // Update existing monthly balance
+            if (isDebitHead) {
+                // For debit heads, only update receipts/payments - don't update balances
+                const newReceipts = side === '+'
+                    ? parseFloat(monthlyBalance.receipts) + parseFloat(amount)
+                    : parseFloat(monthlyBalance.receipts);
 
-            if (side === '+') {
-                newReceipts += parseFloat(amount);
-                newCashInHand += parseFloat(cashAmount);
-                newCashInBank += parseFloat(bankAmount);
+                const newPayments = side === '-'
+                    ? parseFloat(monthlyBalance.payments) + parseFloat(amount)
+                    : parseFloat(monthlyBalance.payments);
+
+                await monthlyBalance.update({
+                    receipts: newReceipts,
+                    payments: newPayments,
+                    // Keep balances at zero for debit heads
+                    opening_balance: 0,
+                    closing_balance: 0
+                }, { transaction });
+
+                console.log(`Updated debit head monthly snapshot, receipts: ${newReceipts}, payments: ${newPayments}`);
             } else {
-                newPayments += parseFloat(amount);
-                newCashInHand -= parseFloat(cashAmount);
-                newCashInBank -= parseFloat(bankAmount);
-            }
+                // For credit heads, update all values including balances
+                const newReceipts = side === '+'
+                    ? parseFloat(monthlyBalance.receipts) + parseFloat(amount)
+                    : parseFloat(monthlyBalance.receipts);
 
-            const openingBalance = parseFloat(monthlyBalance.opening_balance);
-            const newClosingBalance = openingBalance + newReceipts - newPayments;
+                const newPayments = side === '-'
+                    ? parseFloat(monthlyBalance.payments) + parseFloat(amount)
+                    : parseFloat(monthlyBalance.payments);
 
-            // Update the monthly snapshot
-            await monthlyBalance.update({
-                receipts: newReceipts,
-                payments: newPayments,
-                closing_balance: newClosingBalance,
-                cash_in_hand: newCashInHand,
-                cash_in_bank: newCashInBank
-            }, { transaction });
+                // Calculate new closing balance
+                const newClosingBalance = parseFloat(monthlyBalance.opening_balance) + newReceipts - newPayments;
 
-            console.log(`Updated monthly balance for ${month}/${year}: opening=${openingBalance}, receipts=${newReceipts}, payments=${newPayments}, closing=${newClosingBalance}`);
-        }
+                // Update cash/bank balances
+                let newCashInHand = parseFloat(monthlyBalance.cash_in_hand);
+                let newCashInBank = parseFloat(monthlyBalance.cash_in_bank);
 
-        // Check if this transaction is backdated (earlier than the current open period)
-        // If so, recalculate all subsequent monthly snapshots
-        const currentDate = new Date();
-        const currentMonth = currentDate.getMonth() + 1;
-        const currentYear = currentDate.getFullYear();
-
-        // Transaction is backdated if its year is less than current year,
-        // or if it's the same year but an earlier month
-        const isBackdated = (year < currentYear) || (year === currentYear && month < currentMonth);
-
-        if (isBackdated) {
-            try {
-                console.log(`Transaction is backdated (${month}/${year}), recalculating subsequent monthly snapshots`);
-                const BalanceCalculator = require('../utils/balanceCalculator');
-
-                // Get the account details for logging
-                const account = await db.Account.findByPk(ledgerHead.account_id, {
-                    transaction,
-                    attributes: ['name']
-                });
-
-                const ledgerHeadDetails = await db.LedgerHead.findByPk(ledgerHeadId, {
-                    transaction,
-                    attributes: ['name']
-                });
-
-                console.log(`Recalculating balances for account ${account ? account.name : ledgerHead.account_id}, ledger head ${ledgerHeadDetails ? ledgerHeadDetails.name : ledgerHeadId}`);
-
-                // Recalculate from the first day of the transaction month
-                const recalcResult = await BalanceCalculator.recalculateMonthlySnapshots(
-                    ledgerHead.account_id,
-                    ledgerHeadId,
-                    new Date(txDateObj.getFullYear(), txDateObj.getMonth(), 1),
-                    transaction
-                );
-
-                console.log(`Balance recalculation complete. Delta: ${recalcResult.delta}, Affected months: ${recalcResult.recalculatedMonths}`);
-
-                // Once recalculation is complete, make sure all periods except the current one are marked as closed
-                // This ensures only the current period remains open after backdated changes
-                if (recalcResult.recalculatedMonths > 0) {
-                    try {
-                        await this.ensureOnlyCurrentPeriodOpen(ledgerHead.account_id, transaction, true);
-                    } catch (periodLockError) {
-                        console.error('Error ensuring only current period is open:', periodLockError);
-                        // Continue with the transaction - this is not critical enough to fail the whole process
-                    }
+                if (side === '+') {
+                    newCashInHand += parseFloat(cashAmount);
+                    newCashInBank += parseFloat(bankAmount);
+                } else {
+                    newCashInHand -= parseFloat(cashAmount);
+                    newCashInBank -= parseFloat(bankAmount);
                 }
-            } catch (recalcError) {
-                console.error('Error during balance recalculation:', recalcError);
-                // Log the error but don't block the transaction - the base transaction should still go through
-                // We can fix any inconsistencies later with the reconciliation job
+
+                await monthlyBalance.update({
+                    receipts: newReceipts,
+                    payments: newPayments,
+                    closing_balance: newClosingBalance,
+                    cash_in_hand: newCashInHand,
+                    cash_in_bank: newCashInBank
+                }, { transaction });
+
+                console.log(`Updated credit head monthly balance, new closing balance: ${newClosingBalance}`);
             }
         }
+
+        console.log(`Ledger head balance updated: ${ledgerHeadId}, current balance: ${newCurrentBalance}`);
     }
 
     /**

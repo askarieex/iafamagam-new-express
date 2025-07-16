@@ -280,14 +280,31 @@ const updateLedgerHeadBalances = async (month, year) => {
         // For each monthly balance, update the corresponding ledger head
         for (const monthlyBalance of monthlyBalances) {
             try {
-                // Update the ledger head's balances with the monthly balance closing values
-                await monthlyBalance.ledgerHead.update({
-                    current_balance: monthlyBalance.closing_balance,
-                    cash_balance: monthlyBalance.cash_in_hand,
-                    bank_balance: monthlyBalance.cash_in_bank
-                });
+                // Check if this is a debit or credit ledger head
+                const isDebitHead = monthlyBalance.ledgerHead?.head_type === 'debit';
 
-                console.log(`Updated ledger head ${monthlyBalance.ledger_head_id} balance to ${monthlyBalance.closing_balance}`);
+                if (isDebitHead) {
+                    // For debit heads, current_balance should be total expenses (payments - receipts)
+                    // Don't update cash_in_hand or cash_in_bank for debit heads
+                    const totalExpenses = parseFloat(monthlyBalance.payments) - parseFloat(monthlyBalance.receipts);
+
+                    await monthlyBalance.ledgerHead.update({
+                        current_balance: totalExpenses,
+                        // Don't update cash_in_hand or cash_in_bank for debit heads
+                    });
+
+                    console.log(`Updated debit head ${monthlyBalance.ledger_head_id} expense amount to ${totalExpenses}`);
+                } else {
+                    // For credit heads, update with proper balances including cash/bank
+                    await monthlyBalance.ledgerHead.update({
+                        current_balance: monthlyBalance.closing_balance,
+                        cash_balance: monthlyBalance.cash_in_hand,
+                        bank_balance: monthlyBalance.cash_in_bank
+                    });
+
+                    console.log(`Updated credit head ${monthlyBalance.ledger_head_id} balance to ${monthlyBalance.closing_balance}`);
+                }
+
                 results.updated++;
             } catch (err) {
                 console.error(`Error updating ledger head ${monthlyBalance.ledger_head_id}:`, err);

@@ -725,9 +725,10 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
         if (!ledger) return null;
 
-        const totalBalance = parseFloat(ledger.current_balance || 0);
         const bankBalance = parseFloat(ledger.bank_balance || 0);
         const cashBalance = parseFloat(ledger.cash_balance || 0);
+        // Calculate total as sum of cash and bank balance, not using current_balance which may be outdated
+        const totalBalance = cashBalance + bankBalance;
 
         return (
             <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg">
@@ -738,68 +739,93 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                             </svg>
                         </div>
-                        <span className="text-indigo-800">Available Balance:</span>
+                        <span className="text-indigo-800">{ledger.head_type === 'debit' ? 'Expense Amount' : 'Available Balance'}:</span>
                         <span className="ml-2 text-indigo-700 font-bold">{ledger.name}</span>
                     </h3>
                 </div>
-                <div className="grid grid-cols-3 divide-x divide-gray-200">
+                {ledger.head_type === 'debit' ? (
+                    // For debit heads, only show the total amount
                     <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-gray-50 to-white">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
-                            <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <div className="text-xs text-red-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                            <svg className="w-3 h-3 mr-1 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                             </svg>
-                            TOTAL BALANCE
+                            EXPENSE AMOUNT
                         </div>
-                        <div className="text-2xl font-bold text-gray-800 mt-1">
+                        <div className="text-3xl font-bold text-red-600 mt-2">
                             ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
+                        <div className="text-xs text-gray-500 mt-2">
+                            Total expenses for this category
+                        </div>
                         <div className="absolute -right-6 -bottom-6 opacity-5">
-                            <svg className="w-20 h-20 text-gray-800" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                            <svg className="w-20 h-20 text-red-300" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
                                 <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
                             </svg>
                         </div>
                     </div>
-                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-blue-50 to-white">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
-                            <svg className="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
-                            </svg>
-                            CASH IN BANK
+                ) : (
+                    // For credit heads, show the detailed breakdown
+                    <div className="grid grid-cols-3 divide-x divide-gray-200">
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-gray-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                                TOTAL BALANCE
+                            </div>
+                            <div className="text-2xl font-bold text-gray-800 mt-1">
+                                ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-gray-800" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                                    <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                                </svg>
+                            </div>
                         </div>
-                        <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'} mt-1`}>
-                            ₹{bankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-blue-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                                </svg>
+                                CASH IN BANK
+                            </div>
+                            <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'} mt-1`}>
+                                ₹{bankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                    <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                                </svg>
+                            </div>
                         </div>
-                        <div className="absolute -right-6 -bottom-6 opacity-5">
-                            <svg className="w-20 h-20 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                                <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
-                            </svg>
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-green-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                                CASH IN HAND
+                            </div>
+                            <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'} mt-1`}>
+                                ₹{cashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-green-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
-                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-green-50 to-white">
-                        <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
-                            <svg className="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                            </svg>
-                            CASH IN HAND
-                        </div>
-                        <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'} mt-1`}>
-                            ₹{cashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div className="absolute -right-6 -bottom-6 opacity-5">
-                            <svg className="w-20 h-20 text-green-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                                <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                            </svg>
-                        </div>
-                    </div>
-                </div>
+                )}
             </div>
         );
     };
 
     // Component to calculate and display projected balance
-    const ProjectedBalance = ({ledgerId, amountToDeduct, cashType}) => {
+    const ProjectedBalance = ({ ledgerId, amountToDeduct, cashType }) => {
         const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
         if (!ledger) return null;
 
@@ -1410,7 +1436,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                     <span className="bg-amber-100 text-amber-700 p-2 rounded-full mr-2 flex items-center justify-center">
                                         <FaMoneyCheck className="w-4 h-4" />
                                     </span>
-                                    Cheque Amount <span className="text-red-500 ml-1">*</span>
+                                    Cheque Expense Amount <span className="text-red-500 ml-1">*</span>
                                 </label>
                                 <div className="relative mt-2">
                                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -1572,7 +1598,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 <span className={`p-2 rounded-full mr-2 flex items-center justify-center ${formData.cash_type === 'cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                                     {formData.cash_type === 'cash' ? <FaMoneyBillWave className="w-4 h-4" /> : <FaUniversity className="w-4 h-4" />}
                                 </span>
-                                Amount <span className="text-red-500 ml-1">*</span>
+                                Expense Amount <span className="text-red-500 ml-1">*</span>
                             </label>
                             <div className="relative mt-2">
                                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -1610,199 +1636,199 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             )}
                         </div>
-                                )}{/* Voucher, Date and Description - All in one row */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                                    {/* Voucher Number */}
-                                    <div>
-                                        <label className="flex justify-between text-xs font-medium text-gray-700 mb-1">
-                                            <span>Voucher Number *</span>
-                                            <div className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    id="manual_voucher"
-                                                    name="manual_voucher"
-                                                    checked={formData.manual_voucher}
-                                                    onChange={handleManualVoucherToggle}
-                                                    className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                                                />
-                                                <label htmlFor="manual_voucher" className="text-xs text-gray-600">
-                                                    Allot Manually
-                                                </label>
-                                            </div>
-                                        </label>
-                                        <div className="relative">
-                                            {formData.manual_voucher ? (
-                                                <input
-                                                    type="text"
-                                                    name="voucher_number"
-                                                    id="voucher_number"
-                                                    value={formData.voucher_number}
-                                                    onChange={handleInputChange}
-                                                    placeholder="CV-serial/MM/YY"
-                                                    className={`w-full p-2 border ${errors.voucher_number ? 'border-red-500' : 'border-gray-300'} rounded-md`}
-                                                    aria-invalid={!!errors.voucher_number}
-                                                    aria-describedby={errors.voucher_number ? "voucher_error" : undefined}
-                                                />
-                                            ) : (
-                                                <div className="bg-gray-100 border border-gray-200 rounded-full px-4 py-2 text-center font-medium text-gray-700">
-                                                    {formData.voucher_number}
-                                                </div>
-                                            )}
-                                        </div>
-                                        {errors.voucher_number && (
-                                            <p id="voucher_error" className="text-red-500 text-xs mt-1 error-message">{errors.voucher_number}</p>
-                                        )}
-                                    </div>
-
-                                    {/* Transaction Date */}
-                                    <div>
-                                        <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
-                                            <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
-                                            Transaction Date *
-                                        </label>
-                                        <div className="relative">
-                                            <input
-                                                id="tx_date"
-                                                type="date"
-                                                name="tx_date"
-                                                value={formData.tx_date}
-                                                onChange={handleInputChange}
-                                                className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
-                                                aria-invalid={!!errors.tx_date}
-                                                aria-describedby={errors.tx_date ? "date_error" : undefined}
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const today = new Date().toISOString().split('T')[0];
-                                                    setFormData(prev => ({ ...prev, tx_date: today }));
-                                                }}
-                                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
-                                            >
-                                                Today
-                                            </button>
-                                            {/* Display formatted date for better readability */}
-                                            {formData.tx_date && (
-                                                <div className="text-xs mt-1 text-gray-500">
-                                                    {new Date(formData.tx_date).toLocaleDateString('en-IN', {
-                                                        day: '2-digit',
-                                                        month: '2-digit',
-                                                        year: 'numeric'
-                                                    }).replace(/\//g, '-')}
-                                                </div>
-                                            )}
-                                        </div>
-                                        {errors.tx_date && (
-                                            <p id="date_error" className="text-red-500 text-xs mt-1 error-message" aria-live="polite">{errors.tx_date}</p>
-                                        )}
-                                    </div>
-
-                                    {/* Description */}
-                                    <div>
-                                        <label htmlFor="description" className="block text-xs font-medium text-gray-700 mb-1">
-                                            Description (Optional)
-                                        </label>
-                                        <div className="relative">
-                                            <textarea
-                                                id="description"
-                                                name="description"
-                                                value={formData.description}
-                                                onChange={handleInputChange}
-                                                placeholder="Example: Purchase of office supplies"
-                                                className="w-full p-2 border border-gray-300 rounded-md"
-                                                rows="2"
-                                                maxLength="120"
-                                                aria-describedby="desc_counter"
-                                            ></textarea>
-                                            <div id="desc_counter" className="text-xs text-gray-500 text-right mt-1">
-                                                {formData.description.length}/120 characters
-                                            </div>
-                                        </div>
-                                    </div>
+                    )}{/* Voucher, Date and Description - All in one row */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                        {/* Voucher Number */}
+                        <div>
+                            <label className="flex justify-between text-xs font-medium text-gray-700 mb-1">
+                                <span>Voucher Number *</span>
+                                <div className="flex items-center">
+                                    <input
+                                        type="checkbox"
+                                        id="manual_voucher"
+                                        name="manual_voucher"
+                                        checked={formData.manual_voucher}
+                                        onChange={handleManualVoucherToggle}
+                                        className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                    />
+                                    <label htmlFor="manual_voucher" className="text-xs text-gray-600">
+                                        Allot Manually
+                                    </label>
                                 </div>
-
-                                {/* Form Actions */}
-                                <div className="flex justify-end space-x-5 mt-10 pt-6 border-t border-gray-100">
-                                    <button
-                                        type="button"
-                                        onClick={onCancel}
-                                        className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 flex items-center font-medium transition-all duration-200 shadow-sm hover:shadow"
-                                        disabled={submitting}
-                                    >
-                                        <FaTimes className="mr-2 text-gray-500" />
-                                        <span>Cancel</span>
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
-                                        disabled={submitting}
-                                    >
-                                        {submitting ? (
-                                            <div className="flex items-center">
-                                                <div className="w-5 h-5 mr-3 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
-                                                <span>{isEditing ? 'Updating...' : 'Saving...'}</span>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center">
-                                                <FaSave className="mr-2" />
-                                                <span>{isEditing ? 'Update Transaction' : 'Save Transaction'}</span>
-                                            </div>
-                                        )}
-                                    </button>
-                                </div>
-
-                                {/* Additional note about balance changes */}
-                                {formData.source_ledger_head_id && formData.ledger_head_id && (
-                                    <div className="mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">
-                                        <div className="flex items-start">
-                                            <div className="bg-indigo-100 p-2 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                                                <FaInfoCircle className="text-indigo-500" />
-                                            </div>
-                                            <div>
-                                                <p className="font-medium mb-1">Balance Changes Summary:</p>
-                                                <p>Funds will be transferred from <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || ''}</span> to <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || ''}</span>.</p>
-                                            </div>
-                                        </div>
+                            </label>
+                            <div className="relative">
+                                {formData.manual_voucher ? (
+                                    <input
+                                        type="text"
+                                        name="voucher_number"
+                                        id="voucher_number"
+                                        value={formData.voucher_number}
+                                        onChange={handleInputChange}
+                                        placeholder="CV-serial/MM/YY"
+                                        className={`w-full p-2 border ${errors.voucher_number ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                        aria-invalid={!!errors.voucher_number}
+                                        aria-describedby={errors.voucher_number ? "voucher_error" : undefined}
+                                    />
+                                ) : (
+                                    <div className="bg-gray-100 border border-gray-200 rounded-full px-4 py-2 text-center font-medium text-gray-700">
+                                        {formData.voucher_number}
                                     </div>
                                 )}
-                            </form>
-                        )}
-
-                        {/* Additional balance displays and projected balances */}
-                        {formData.source_ledger_head_id && formData.amount && formData.cash_type !== 'multiple' && (
-                            <ProjectedBalance
-                                ledgerId={formData.source_ledger_head_id}
-                                amountToDeduct={formData.amount}
-                                cashType={formData.cash_type}
-                            />
-                        )}
-
-                        {formData.source_ledger_head_id && formData.cash_type === 'multiple' &&
-                            (formData.cash_amount || formData.bank_amount) && (
-                                <ProjectedBalance
-                                    ledgerId={formData.source_ledger_head_id}
-                                    cashType="multiple"
-                                />
+                            </div>
+                            {errors.voucher_number && (
+                                <p id="voucher_error" className="text-red-500 text-xs mt-1 error-message">{errors.voucher_number}</p>
                             )}
+                        </div>
 
-                        {/* Total Amount Display for Both */}
-                        {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
-                            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-200 shadow-sm animate-fadeIn hover:shadow-md transition-all duration-200">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center">
-                                        <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mr-4 shadow-sm">
-                                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                            </svg>
-                                        </div>
-                                        <span className="text-base font-medium text-gray-700">Total Amount:</span>
+                        {/* Transaction Date */}
+                        <div>
+                            <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
+                                <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
+                                Transaction Date *
+                            </label>
+                            <div className="relative">
+                                <input
+                                    id="tx_date"
+                                    type="date"
+                                    name="tx_date"
+                                    value={formData.tx_date}
+                                    onChange={handleInputChange}
+                                    className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                    aria-invalid={!!errors.tx_date}
+                                    aria-describedby={errors.tx_date ? "date_error" : undefined}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const today = new Date().toISOString().split('T')[0];
+                                        setFormData(prev => ({ ...prev, tx_date: today }));
+                                    }}
+                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
+                                >
+                                    Today
+                                </button>
+                                {/* Display formatted date for better readability */}
+                                {formData.tx_date && (
+                                    <div className="text-xs mt-1 text-gray-500">
+                                        {new Date(formData.tx_date).toLocaleDateString('en-IN', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric'
+                                        }).replace(/\//g, '-')}
                                     </div>
-                                    <span className="text-2xl font-bold text-indigo-700">
-                                        ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
-                                    </span>
+                                )}
+                            </div>
+                            {errors.tx_date && (
+                                <p id="date_error" className="text-red-500 text-xs mt-1 error-message" aria-live="polite">{errors.tx_date}</p>
+                            )}
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                            <label htmlFor="description" className="block text-xs font-medium text-gray-700 mb-1">
+                                Description (Optional)
+                            </label>
+                            <div className="relative">
+                                <textarea
+                                    id="description"
+                                    name="description"
+                                    value={formData.description}
+                                    onChange={handleInputChange}
+                                    placeholder="Example: Purchase of office supplies"
+                                    className="w-full p-2 border border-gray-300 rounded-md"
+                                    rows="2"
+                                    maxLength="120"
+                                    aria-describedby="desc_counter"
+                                ></textarea>
+                                <div id="desc_counter" className="text-xs text-gray-500 text-right mt-1">
+                                    {formData.description.length}/120 characters
                                 </div>
                             </div>
-                        )}
+                        </div>
                     </div>
-                    );
+
+                    {/* Form Actions */}
+                    <div className="flex justify-end space-x-5 mt-10 pt-6 border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 flex items-center font-medium transition-all duration-200 shadow-sm hover:shadow"
+                            disabled={submitting}
+                        >
+                            <FaTimes className="mr-2 text-gray-500" />
+                            <span>Cancel</span>
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
+                            disabled={submitting}
+                        >
+                            {submitting ? (
+                                <div className="flex items-center">
+                                    <div className="w-5 h-5 mr-3 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
+                                    <span>{isEditing ? 'Updating...' : 'Saving...'}</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center">
+                                    <FaSave className="mr-2" />
+                                    <span>{isEditing ? 'Update Transaction' : 'Save Transaction'}</span>
+                                </div>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Additional note about balance changes */}
+                    {formData.source_ledger_head_id && formData.ledger_head_id && (
+                        <div className="mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">
+                            <div className="flex items-start">
+                                <div className="bg-indigo-100 p-2 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                                    <FaInfoCircle className="text-indigo-500" />
+                                </div>
+                                <div>
+                                    <p className="font-medium mb-1">Balance Changes Summary:</p>
+                                    <p>Funds will be transferred from <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || ''}</span> to <span className="font-semibold text-indigo-800">{ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || ''}</span>.</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </form>
+            )}
+
+            {/* Additional balance displays and projected balances */}
+            {formData.source_ledger_head_id && formData.amount && formData.cash_type !== 'multiple' && (
+                <ProjectedBalance
+                    ledgerId={formData.source_ledger_head_id}
+                    amountToDeduct={formData.amount}
+                    cashType={formData.cash_type}
+                />
+            )}
+
+            {formData.source_ledger_head_id && formData.cash_type === 'multiple' &&
+                (formData.cash_amount || formData.bank_amount) && (
+                    <ProjectedBalance
+                        ledgerId={formData.source_ledger_head_id}
+                        cashType="multiple"
+                    />
+                )}
+
+            {/* Total Amount Display for Both */}
+            {formData.cash_type === 'multiple' && (formData.cash_amount || formData.bank_amount) && (
+                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-200 shadow-sm animate-fadeIn hover:shadow-md transition-all duration-200">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                            <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mr-4 shadow-sm">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                            </div>
+                            <span className="text-base font-medium text-gray-700">Total Amount:</span>
+                        </div>
+                        <span className="text-2xl font-bold text-indigo-700">
+                            ₹{(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0)).toFixed(2)}
+                        </span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 } 

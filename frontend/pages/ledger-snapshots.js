@@ -527,86 +527,113 @@ export default function LedgerSnapshots() {
                                 {expandedMonths[month] && (
                                     <div>
                                         {monthlyData[month]?.balances.length > 0 ? (
-                                            <table className="w-full">
-                                                <thead className="bg-gray-50">
-                                                    <tr>
-                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Ledger Head
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Opening Balance
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Receipts
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Payments
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Closing Balance
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Cash In Hand
-                                                        </th>
-                                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                            Cash In Bank
-                                                        </th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-200">
-                                                    {monthlyData[month].balances.map((balance) => (
-                                                        <tr key={balance.id} className="hover:bg-gray-50">
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                                {balance.ledgerHead?.name || 'Unknown'}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                                                {formatCurrency(balance.opening_balance)}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-600">
-                                                                {formatCurrency(balance.receipts)}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-600">
-                                                                {formatCurrency(balance.payments)}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                                                                {formatCurrency(balance.closing_balance)}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                                                {formatCurrency(balance.cash_in_hand)}
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                                                {formatCurrency(balance.cash_in_bank)}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                            <div className="side-by-side-ledger">
+                                                {/* Side by side table with credit on left, debit on right */}
+                                                <table className="w-full border-collapse border border-gray-200">
+                                                    <thead>
+                                                        <tr>
+                                                            <th className="border border-gray-200 bg-gray-50 text-left px-3 py-2 text-xs font-medium text-gray-600">Ledger Head</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">O.B</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Recep. During the Month</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">C. Total</th>
 
-                                                    {/* Totals row */}
-                                                    <tr className="bg-gray-100 font-medium">
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                            TOTAL
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                                            {/* Opening balance total not calculated */}
-                                                            {formatCurrency(0)}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-700">
-                                                            {formatCurrency(monthlyData[month]?.totals.receipts || 0)}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-700">
-                                                            {formatCurrency(monthlyData[month]?.totals.payments || 0)}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                                                            {formatCurrency(monthlyData[month]?.totals.balance || 0)}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                                            {formatCurrency(monthlyData[month]?.totals.cashInHand || 0)}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                                                            {formatCurrency(monthlyData[month]?.totals.cashInBank || 0)}
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
+                                                            <th className="border border-gray-200 bg-gray-50 text-left px-3 py-2 text-xs font-medium text-gray-600">Ledger Head</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Amount</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Balance</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Cash In Bank</th>
+                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Cash In Hand</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {(() => {
+                                                            const creditHeads = monthlyData[month].balances
+                                                                .filter(balance => balance.ledgerHead?.head_type === 'credit');
+
+                                                            const debitHeads = monthlyData[month].balances
+                                                                .filter(balance => balance.ledgerHead?.head_type === 'debit');
+
+                                                            const maxRows = Math.max(creditHeads.length, debitHeads.length);
+
+                                                            const rows = [];
+
+                                                            for (let i = 0; i < maxRows; i++) {
+                                                                const creditHead = creditHeads[i] || null;
+                                                                const debitHead = debitHeads[i] || null;
+
+                                                                rows.push(
+                                                                    <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                                                                        {/* Credit Head Side */}
+                                                                        <td className="border border-gray-200 px-3 py-2 text-sm">
+                                                                            {creditHead ? creditHead.ledgerHead?.name || 'Unknown' : ''}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
+                                                                            {creditHead ? formatCurrency(creditHead.opening_balance) : ''}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm text-green-600">
+                                                                            {creditHead ? formatCurrency(creditHead.receipts) : ''}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm font-medium">
+                                                                            {creditHead ? formatCurrency(creditHead.closing_balance) : ''}
+                                                                        </td>
+
+                                                                        {/* Debit Head Side */}
+                                                                        <td className="border border-gray-200 px-3 py-2 text-sm">
+                                                                            {debitHead ? debitHead.ledgerHead?.name || 'Unknown' : ''}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm text-red-600 font-medium">
+                                                                            {debitHead ? formatCurrency(Math.abs(parseFloat(debitHead.payments))) : ''}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
+                                                                            {/* Empty balance column for debit heads */}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
+                                                                            {/* Empty bank column for debit heads */}
+                                                                        </td>
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
+                                                                            {/* Empty cash column for debit heads */}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            }
+
+                                                            // Add totals row
+                                                            const creditTotal = creditHeads.reduce((sum, head) => sum + parseFloat(head.closing_balance || 0), 0);
+                                                            const debitTotal = debitHeads.reduce((sum, head) => sum + Math.abs(parseFloat(head.payments || 0)), 0);
+
+                                                            rows.push(
+                                                                <tr key="totals" className="font-bold bg-gray-100">
+                                                                    <td className="border border-gray-200 px-3 py-2">Total (T1)</td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
+                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.opening_balance || 0), 0))}
+                                                                    </td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right text-green-700">
+                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.receipts || 0), 0))}
+                                                                    </td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right font-medium">
+                                                                        {formatCurrency(creditTotal)}
+                                                                    </td>
+
+                                                                    <td className="border border-gray-200 px-3 py-2">Total</td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right text-red-700">
+                                                                        {formatCurrency(debitTotal)}
+                                                                    </td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right font-medium">
+                                                                        {formatCurrency(creditTotal - debitTotal)}
+                                                                    </td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
+                                                                        {formatCurrency(monthlyData[month]?.totals.cashInBank || 0)}
+                                                                    </td>
+                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
+                                                                        {formatCurrency(monthlyData[month]?.totals.cashInHand || 0)}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+
+                                                            return rows;
+                                                        })()}
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         ) : (
                                             <div className="p-6 text-center text-gray-500">
                                                 <FaRegFileAlt className="mx-auto mb-2 text-2xl opacity-30" />

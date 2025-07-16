@@ -127,6 +127,110 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
         }
     }, [formData.bank_amount, formData.cash_amount, formData.cash_type]);
 
+    // Create a styled banner for the balance display
+    const BalanceBanner = ({ ledgerId }) => {
+        const ledger = ledgerHeads.find(h => h.id.toString() === ledgerId);
+        if (!ledger) return null;
+
+        const bankBalance = parseFloat(ledger.bank_balance || 0);
+        const cashBalance = parseFloat(ledger.cash_balance || 0);
+        // Calculate total as sum of cash and bank balance, not using current_balance which may be outdated
+        const totalBalance = cashBalance + bankBalance;
+
+        return (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg">
+                <div className="px-5 py-4 bg-gradient-to-r from-green-50 via-teal-50 to-green-50 border-b border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 flex items-center">
+                        <div className="bg-green-100 p-1.5 rounded-full mr-2">
+                            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                        </div>
+                        <span className="text-green-800">{ledger.head_type === 'credit' ? 'Income Balance' : 'Available Balance'}:</span>
+                        <span className="ml-2 text-green-700 font-bold">{ledger.name}</span>
+                    </h3>
+                </div>
+                {ledger.head_type === 'debit' ? (
+                    // For debit heads, only show the total amount
+                    <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-gray-50 to-white">
+                        <div className="text-xs text-red-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                            <svg className="w-3 h-3 mr-1 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            EXPENSE AMOUNT
+                        </div>
+                        <div className="text-3xl font-bold text-red-600 mt-2">
+                            ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2">
+                            Total expenses for this category
+                        </div>
+                        <div className="absolute -right-6 -bottom-6 opacity-5">
+                            <svg className="w-20 h-20 text-red-300" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                                <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                            </svg>
+                        </div>
+                    </div>
+                ) : (
+                    // For credit heads, show the detailed breakdown with cash/bank split
+                    <div className="grid grid-cols-3 divide-x divide-gray-200">
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-gray-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                                TOTAL BALANCE
+                            </div>
+                            <div className="text-2xl font-bold text-gray-800 mt-1">
+                                ₹{totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-gray-800" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                                    <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                                </svg>
+                            </div>
+                        </div>
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-blue-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                                </svg>
+                                CASH IN BANK
+                            </div>
+                            <div className={`text-2xl font-bold ${bankBalance > 0 ? 'text-blue-600' : 'text-gray-400'} mt-1`}>
+                                ₹{bankBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                    <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                        </div>
+                        <div className="p-5 text-center relative overflow-hidden bg-gradient-to-b from-green-50 to-white">
+                            <div className="text-xs text-gray-500 uppercase font-semibold mb-2 flex items-center justify-center">
+                                <svg className="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                                CASH IN HAND
+                            </div>
+                            <div className={`text-2xl font-bold ${cashBalance > 0 ? 'text-green-600' : 'text-gray-400'} mt-1`}>
+                                ₹{cashBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="absolute -right-6 -bottom-6 opacity-5">
+                                <svg className="w-20 h-20 text-green-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     // Fetch all necessary data (accounts, ledger heads, donors, booklets)
     const fetchFormData = async () => {
         try {
@@ -1231,6 +1335,13 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                 )}
                             </div>
 
+                            {/* Display Balance Banner when ledger head is selected */}
+                            {formData.ledger_head_id && (
+                                <div className="mt-3 mb-3">
+                                    <BalanceBanner ledgerId={formData.ledger_head_id} />
+                                </div>
+                            )}
+
                             {/* Donor Selection with enhanced styling */}
                             <div className="bg-white p-2 rounded-lg border border-gray-200/80 shadow-sm">
                                 <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center">
@@ -1396,7 +1507,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                     <div className="bg-white p-2.5 rounded-md border border-green-100 shadow-sm transition-all duration-200 hover:shadow-md">
                                         <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
                                             <FaMoneyBillWave className="text-green-500 mr-1.5 text-xs" />
-                                            Cash Amount <span className="text-red-500">*</span>
+                                            Cash Income Amount <span className="text-red-500">*</span>
                                         </label>
                                         <div className="relative group bg-white shadow-inner rounded overflow-hidden border-2 border-green-100 focus-within:border-green-400 transition-all duration-200">
                                             <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
@@ -1424,7 +1535,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                     <div className="bg-white p-2.5 rounded-md border border-green-100 shadow-sm transition-all duration-200 hover:shadow-md">
                                         <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
                                             <FaUniversity className="text-green-500 mr-1.5 text-xs" />
-                                            Bank Amount <span className="text-red-500">*</span>
+                                            Bank Income Amount <span className="text-red-500">*</span>
                                         </label>
                                         <div className="relative group bg-white shadow-inner rounded overflow-hidden border-2 border-green-100 focus-within:border-green-400 transition-all duration-200">
                                             <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
@@ -1457,7 +1568,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                         ) : (
                                             <FaUniversity className="text-green-500 mr-1.5 text-xs" />
                                         )}
-                                        {formData.cash_type === 'cash' ? 'Cash' : 'Bank'} Amount <span className="text-red-500">*</span>
+                                        {formData.cash_type === 'cash' ? 'Cash' : 'Bank'} Income Amount <span className="text-red-500">*</span>
                                     </label>
                                     <div className="relative group bg-white shadow-inner rounded overflow-hidden border-2 border-green-100 focus-within:border-green-400 transition-all duration-200">
                                         <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
@@ -1488,7 +1599,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                     <div className="flex justify-between items-center">
                                         <span className="text-xs font-medium text-gray-700 flex items-center">
                                             <FaRupeeSign className="text-green-500 mr-1.5 text-xs" />
-                                            Total Amount
+                                            Total Income Amount
                                         </span>
                                         <span className="text-sm font-bold text-green-600">
                                             ₹{parseFloat(formData.amount || 0).toFixed(2)}
