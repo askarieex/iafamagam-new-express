@@ -54,6 +54,13 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const [donors, setDonors] = useState([]);
     const [booklets, setBooklets] = useState([]);
 
+    // Balance data state
+    const [ledgerBalance, setLedgerBalance] = useState(null);
+    const [balanceLoading, setBalanceLoading] = useState(false);
+    const [historicalBalances, setHistoricalBalances] = useState([]);
+    const [isDateSelected, setIsDateSelected] = useState(false);
+    const [snapshotLoading, setSnapshotLoading] = useState(false);
+
     // Period closure fields
     const [selectedAccount, setSelectedAccount] = useState(null);
     const [showAdminOverrideModal, setShowAdminOverrideModal] = useState(false);
@@ -81,6 +88,317 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
     const ledgerDropdownRef = useRef(null);
     const donorDropdownRef = useRef(null);
 
+    // Fetch historical balances for the selected date and account (DATE-FIRST WORKFLOW)
+    const fetchHistoricalBalances = async (accountId, date) => {
+        if (!accountId || !date) {
+            setHistoricalBalances([]);
+            setLedgerBalance(null);
+            return;
+        }
+
+        try {
+            setSnapshotLoading(true);
+            console.log(`Fetching historical balances for account ${accountId} on ${date}`);
+            
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/transactions/snapshot`, {
+                params: {
+                    account_id: accountId,
+                    date: date
+                }
+            });
+            
+            if (response.data && response.data.success) {
+                setHistoricalBalances(response.data.data);
+                console.log('Historical balances loaded:', response.data.data);
+                
+                // If a ledger head is already selected, update its balance from historical data
+                if (formData.ledger_head_id) {
+                    const selectedLedgerSnapshot = response.data.data.find(
+                        balance => balance.ledger_head_id.toString() === formData.ledger_head_id.toString()
+                    );
+                    
+                    if (selectedLedgerSnapshot) {
+                        setLedgerBalance({
+                            current_balance: selectedLedgerSnapshot.closing_balance,
+                            cash_balance: selectedLedgerSnapshot.cash_in_hand,
+                            bank_balance: selectedLedgerSnapshot.cash_in_bank
+                        });
+                    }
+                }
+            } else {
+                setHistoricalBalances([]);
+                console.error('Failed to fetch historical balances:', response.data?.message);
+                toast.error('Failed to load historical balances for this date');
+            }
+        } catch (error) {
+            console.error('Error fetching historical balances:', error);
+            setHistoricalBalances([]);
+            
+            // Show user-friendly error message
+            if (error.response?.status === 404) {
+                toast.error('No balance data found for this date. Please select a different date.');
+            } else {
+                toast.error('Error loading historical balances. Please try again.');
+            }
+        } finally {
+            setSnapshotLoading(false);
+        }
+    };
+
+    // Handle date change - this is the KEY part of the date-first workflow
+    const handleDateChange = async (e) => {
+        const newDate = e.target.value;
+        
+        setFormData(prev => ({
+            ...prev,
+            tx_date: newDate
+        }));
+
+        // Mark that a date has been selected
+        setIsDateSelected(!!newDate);
+
+        // Clear previous balance data
+        setLedgerBalance(null);
+        setHistoricalBalances([]);
+
+        // If we have an account selected, fetch historical balances for this date
+        if (newDate && formData.account_id) {
+            await fetchHistoricalBalances(formData.account_id, newDate);
+        }
+
+        // Clear any date-related errors
+        if (errors.tx_date) {
+            setErrors(prev => ({ ...prev, tx_date: null }));
+        }
+    };
+
+    // Fetch ledger balance when account and ledger head are selected
+    const fetchLedgerBalance = async (accountId, ledgerHeadId) => {
+        if (!accountId || !ledgerHeadId) {
+            setLedgerBalance(null);
+            return;
+        }
+
+        try {
+            setBalanceLoading(true);
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/ledger-heads/${ledgerHeadId}/balance`);
+            
+            if (response.data && response.data.success) {
+                setLedgerBalance(response.data.data);
+            } else {
+                // Fallback to getting from ledger heads list
+                const ledgerHead = ledgerHeads.find(head => head.id.toString() === ledgerHeadId.toString());
+                if (ledgerHead) {
+                    setLedgerBalance({
+                        current_balance: ledgerHead.current_balance || 0,
+                        cash_balance: ledgerHead.cash_balance || 0,
+                        bank_balance: ledgerHead.bank_balance || 0
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching ledger balance:', error);
+            // Fallback to data from ledger heads list
+            const ledgerHead = ledgerHeads.find(head => head.id.toString() === ledgerHeadId.toString());
+            if (ledgerHead) {
+                setLedgerBalance({
+                    current_balance: ledgerHead.current_balance || 0,
+                    cash_balance: ledgerHead.cash_balance || 0,
+                    bank_balance: ledgerHead.bank_balance || 0
+                });
+            }
+        } finally {
+            setBalanceLoading(false);
+        }
+    };
+
+    // Handle account selection - Updated for date-first workflow
+    const handleAccountSelect = (account) => {
+        // Get credit type ledger heads for the selected account
+        const accountCreditLedgerHeads = ledgerHeads.filter(
+            head => head && head.account_id === account.id && head.head_type === 'credit'
+        );
+        
+        setFormData(prev => ({
+            ...prev,
+            account_id: account.id,
+            ledger_head_id: '' // Clear ledger selection when account changes
+        }));
+        
+        setAccountSearchQuery('');
+        setIsAccountDropdownOpen(false);
+        setSelectedAccount(account);
+
+        // Clear balance data when account changes
+        setLedgerBalance(null);
+        setHistoricalBalances([]);
+
+        // If we have a date selected, fetch historical balances for this account
+        if (formData.tx_date && isDateSelected) {
+            fetchHistoricalBalances(account.id, formData.tx_date);
+        }
+
+        // Clear account error
+        if (errors.account_id) {
+            setErrors(prev => ({ ...prev, account_id: null }));
+        }
+    };
+
+    // Handle ledger head selection - Updated to use historical balance
+    const handleLedgerHeadSelect = (head) => {
+        setFormData(prev => ({
+            ...prev,
+            ledger_head_id: head.id
+        }));
+        
+        setLedgerHeadSearchQuery('');
+        setIsLedgerDropdownOpen(false);
+
+        // Use historical balance if available, otherwise fetch current balance
+        if (isDateSelected && formData.tx_date && historicalBalances.length > 0) {
+            const selectedLedgerSnapshot = historicalBalances.find(
+                balance => balance.ledger_head_id.toString() === head.id.toString()
+            );
+            
+            if (selectedLedgerSnapshot) {
+                setLedgerBalance({
+                    current_balance: selectedLedgerSnapshot.closing_balance,
+                    cash_balance: selectedLedgerSnapshot.cash_in_hand,
+                    bank_balance: selectedLedgerSnapshot.cash_in_bank
+                });
+                console.log('Using historical balance for ledger:', selectedLedgerSnapshot);
+            }
+        } else if (formData.account_id) {
+            // Fallback to current balance for today's date or when no snapshot available
+            fetchLedgerBalance(formData.account_id, head.id);
+        }
+
+        // Clear ledger head error
+        if (errors.ledger_head_id) {
+            setErrors(prev => ({ ...prev, ledger_head_id: null }));
+        }
+    };
+
+    // Handle donor selection
+    const handleDonorSelect = (donor) => {
+        setFormData(prev => ({
+            ...prev,
+            donor_id: donor.id
+        }));
+        
+        setDonorSearchQuery('');
+        setIsDonorDropdownOpen(false);
+    };
+
+    // Balance display component - Updated for historical balance display
+    const BalanceDisplay = () => {
+        if (!formData.account_id || !formData.ledger_head_id) {
+            return null; // Don't show anything if no selection
+        }
+
+        // Show snapshot loading state
+        if (snapshotLoading) {
+            return (
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
+                        <p className="text-sm text-blue-700 font-medium">
+                            Loading historical balances for {formData.tx_date}...
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (balanceLoading) {
+            return (
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mr-3"></div>
+                        <p className="text-sm text-green-700 font-medium">Loading balance...</p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (!ledgerBalance) {
+            return (
+                <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-center justify-center text-yellow-700">
+                        <FaExclamationTriangle className="h-5 w-5 mr-2" />
+                        <p className="text-sm font-medium">
+                            {isDateSelected ? 'Unable to load historical balance' : 'Please select a date first'}
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        const selectedLedger = ledgerHeads.find(head => head.id.toString() === formData.ledger_head_id.toString());
+        const isHistoricalDate = formData.tx_date !== new Date().toISOString().split('T')[0];
+
+        return (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                    {/* Left side - Ledger name and date context */}
+                    <div className="flex items-center">
+                        <div className="bg-green-100 rounded-full p-2 mr-3">
+                            <FaMoneyBillWave className="h-5 w-5 text-green-600" />
+                        </div>
+                        <div>
+                            <h4 className="text-lg font-semibold text-green-800">
+                                {selectedLedger?.name || 'Selected Ledger'}
+                            </h4>
+                            <p className="text-sm text-green-600">
+                                {isHistoricalDate ? (
+                                    <>Balance as of {formData.tx_date} (Historical)</>
+                                ) : (
+                                    <>Current Balance</>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                    
+                    {/* Right side - Balance information */}
+                    <div className="flex items-center space-x-6">
+                        {/* Total Balance */}
+                        <div className="text-center">
+                            <div className="text-2xl font-bold text-green-900">
+                                ₹{parseFloat(ledgerBalance.current_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-xs text-green-700">Total</p>
+                        </div>
+                        
+                        {/* Cash in Bank */}
+                        <div className="text-center">
+                            <div className="text-lg font-semibold text-blue-600">
+                                ₹{parseFloat(ledgerBalance.bank_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-xs text-blue-600">Cash in Bank</p>
+                        </div>
+                        
+                        {/* Cash in Hand */}
+                        <div className="text-center">
+                            <div className="text-lg font-semibold text-green-600">
+                                ₹{parseFloat(ledgerBalance.cash_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-xs text-green-600">Cash in Hand</p>
+                        </div>
+                    </div>
+                </div>
+                
+                {/* Historical balance warning for back-dated transactions */}
+                {isHistoricalDate && (
+                    <div className="mt-3 p-2 bg-blue-100 border border-blue-200 rounded text-sm text-blue-800">
+                        <FaCalendarAlt className="inline h-4 w-4 mr-1" />
+                        This shows the historical balance as it was on {formData.tx_date}. 
+                        Validation will be based on these historical figures.
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     // Close dropdowns when clicking outside
     useEffect(() => {
         function handleClickOutside(event) {
@@ -100,14 +418,18 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
             }
         }
 
-        // Add event listener
         document.addEventListener('mousedown', handleClickOutside);
-
-        // Cleanup
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, []);
+
+    // Fetch balance when form data changes
+    useEffect(() => {
+        if (formData.account_id && formData.ledger_head_id) {
+            fetchLedgerBalance(formData.account_id, formData.ledger_head_id);
+        }
+    }, [formData.account_id, formData.ledger_head_id]);
 
     // Calculate total amount from bank and cash amounts
     const calculateTotalAmount = () => {
@@ -1193,13 +1515,18 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                             Transaction Details
                         </h3>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            {/* Account Selection with enhanced styling */}
-                            <div className="bg-white p-2 rounded-lg border border-gray-200/80 shadow-sm">
-                                <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center">
-                                    <FaMoneyBillWave className="text-blue-500 mr-1 text-xs" />
-                                    Account <span className="text-red-500 ml-0.5">*</span>
-                                </label>
+                                                    {/* Display Balance at the top when ledger head is selected */}
+                            <div className="mb-4">
+                                <BalanceDisplay />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {/* Account Selection with enhanced styling */}
+                                <div className="bg-white p-2 rounded-lg border border-gray-200/80 shadow-sm">
+                                    <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center">
+                                        <FaMoneyBillWave className="text-blue-500 mr-1 text-xs" />
+                                        Account <span className="text-red-500 ml-0.5">*</span>
+                                    </label>
                                 <div className="relative" ref={accountDropdownRef}>
                                     <div
                                         className="w-full bg-white border border-gray-200 hover:border-blue-400 rounded-md px-2.5 py-1.5 text-sm text-gray-700 cursor-pointer flex justify-between items-center shadow-sm transition-all duration-200 hover:shadow"
@@ -1241,17 +1568,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                             className={`px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 ${formData.account_id === account.id ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                // Get credit type ledger heads for the selected account
-                                                                const accountCreditLedgerHeads = ledgerHeads.filter(
-                                                                    head => head && head.account_id === account.id && head.head_type === 'credit'
-                                                                );
-                                                                setFormData(prev => ({
-                                                                    ...prev,
-                                                                    account_id: account.id,
-                                                                    ledger_head_id: accountCreditLedgerHeads.length > 0 ? accountCreditLedgerHeads[0].id : ''
-                                                                }));
-                                                                setAccountSearchQuery('');
-                                                                setIsAccountDropdownOpen(false);
+                                                                handleAccountSelect(account);
                                                             }}
                                                         >
                                                             {account.name}
@@ -1267,27 +1584,32 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                 )}
                             </div>
 
-                            {/* Ledger Head Selection with enhanced styling */}
+                            {/* Ledger Head Selection with enhanced styling - DISABLED UNTIL DATE SELECTED */}
                             <div className="bg-white p-2 rounded-lg border border-gray-200/80 shadow-sm">
                                 <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center">
                                     <FaLayerGroup className="text-blue-500 mr-1 text-xs" />
                                     Ledger Head <span className="text-red-500 ml-0.5">*</span>
+                                    {!isDateSelected && (
+                                        <span className="text-xs text-gray-500 ml-1">(Select date first)</span>
+                                    )}
                                 </label>
                                 <div className="relative" ref={ledgerDropdownRef}>
                                     <div
-                                        className={`w-full bg-white border border-gray-200 hover:border-blue-400 rounded-md px-2.5 py-1.5 text-sm text-gray-700 flex justify-between items-center shadow-sm transition-all duration-200 hover:shadow ${!formData.account_id ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-                                        onClick={() => formData.account_id && setIsLedgerDropdownOpen(!isLedgerDropdownOpen)}
+                                        className={`w-full bg-white border border-gray-200 hover:border-blue-400 rounded-md px-2.5 py-1.5 text-sm text-gray-700 flex justify-between items-center shadow-sm transition-all duration-200 hover:shadow ${!formData.account_id || !isDateSelected ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        onClick={() => formData.account_id && isDateSelected && setIsLedgerDropdownOpen(!isLedgerDropdownOpen)}
                                     >
                                         <span className="font-medium truncate text-xs">
-                                            {formData.ledger_head_id
-                                                ? (ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id.toString())?.name || 'Select Ledger Head')
-                                                : 'Select Ledger Head'}
+                                            {!isDateSelected 
+                                                ? 'Select transaction date first'
+                                                : formData.ledger_head_id
+                                                    ? (ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id.toString())?.name || 'Select Ledger Head')
+                                                    : 'Select Ledger Head'}
                                         </span>
                                         <svg className={`fill-current h-3 w-3 text-gray-400 transition-transform duration-200 ${isLedgerDropdownOpen ? 'transform rotate-180' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
                                             <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
                                         </svg>
                                     </div>
-                                    {isLedgerDropdownOpen && (
+                                    {isLedgerDropdownOpen && isDateSelected && (
                                         <div className="absolute z-30 w-full mt-1 bg-white border border-gray-100 rounded-md shadow-lg">
                                             <div className="p-1.5 border-b border-gray-100">
                                                 <div className="relative">
@@ -1314,12 +1636,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                             className={`px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 ${formData.ledger_head_id === head.id ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                setFormData(prev => ({
-                                                                    ...prev,
-                                                                    ledger_head_id: head.id
-                                                                }));
-                                                                setLedgerHeadSearchQuery('');
-                                                                setIsLedgerDropdownOpen(false);
+                                                                handleLedgerHeadSelect(head);
                                                             }}
                                                         >
                                                             {head.name}
@@ -1335,12 +1652,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                 )}
                             </div>
 
-                            {/* Display Balance Banner when ledger head is selected */}
-                            {formData.ledger_head_id && (
-                                <div className="mt-3 mb-3">
-                                    <BalanceBanner ledgerId={formData.ledger_head_id} />
-                                </div>
-                            )}
+
 
                             {/* Donor Selection with enhanced styling */}
                             <div className="bg-white p-2 rounded-lg border border-gray-200/80 shadow-sm">
@@ -1390,12 +1702,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                             className={`px-3 py-1.5 text-xs cursor-pointer transition-colors duration-150 ${formData.donor_id === donor.id ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                setFormData(prev => ({
-                                                                    ...prev,
-                                                                    donor_id: donor.id
-                                                                }));
-                                                                setDonorSearchQuery('');
-                                                                setIsDonorDropdownOpen(false);
+                                                                handleDonorSelect(donor);
                                                             }}
                                                         >
                                                             {donor.name}
@@ -1420,26 +1727,32 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                         <div className="p-3 space-y-3">
                             {/* Transaction Date and Payment Method in a row */}
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                {/* Transaction Date with fancy animation */}
-                                <div className="bg-white p-2 rounded-md border border-gray-200/80 shadow-sm">
-                                    <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center">
-                                        <FaCalendarAlt className="text-green-500 mr-1 text-xs" />
-                                        Date <span className="text-red-500 ml-0.5">*</span>
+                                {/* Transaction Date with fancy animation - DATE FIRST WORKFLOW */}
+                                <div className="bg-white p-2 rounded-md border border-blue-300 shadow-sm ring-1 ring-blue-200">
+                                    <label className="block text-xs font-medium text-blue-700 mb-1 flex items-center">
+                                        <FaCalendarAlt className="text-blue-500 mr-1 text-xs" />
+                                        Transaction Date <span className="text-red-500 ml-0.5">*</span>
+                                        <span className="text-xs text-blue-600 ml-1">(Select First)</span>
                                     </label>
                                     <div className="relative group">
                                         <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none text-gray-400">
-                                            <FaCalendarAlt className="w-3 h-3 group-hover:text-green-500 transition-colors duration-200" />
+                                            <FaCalendarAlt className="w-3 h-3 group-hover:text-blue-500 transition-colors duration-200" />
                                         </div>
                                         <input
                                             type="date"
                                             name="tx_date"
                                             value={formData.tx_date}
-                                            onChange={handleInputChange}
-                                            className="pl-7 w-full bg-white border border-gray-200 focus:border-green-400 rounded px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-green-400 shadow-sm transition-all duration-200 hover:shadow"
+                                            onChange={handleDateChange}
+                                            className="pl-7 w-full bg-white border border-blue-200 focus:border-blue-400 rounded px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-blue-400 shadow-sm transition-all duration-200 hover:shadow"
                                             disabled={submitting}
                                             min={getMinDate()}
                                         />
                                     </div>
+                                    {!isDateSelected && (
+                                        <p className="mt-1 text-xs text-blue-600">
+                                            Select a date to load historical balances
+                                        </p>
+                                    )}
                                     {errors.tx_date && (
                                         <p className="mt-1 text-xs text-red-600">{errors.tx_date}</p>
                                     )}
@@ -1518,10 +1831,10 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                 name="cash_amount"
                                                 value={formData.cash_amount || ''}
                                                 onChange={handleInputChange}
-                                                placeholder="Cash amount"
+                                                placeholder={!isDateSelected ? "Select date first" : "Cash amount"}
                                                 className="pl-8 w-full bg-transparent border-none py-2 text-sm text-gray-700 focus:ring-0 font-medium"
                                                 min="0"
-                                                disabled={submitting}
+                                                disabled={submitting || !isDateSelected}
                                             />
                                         </div>
                                         {errors.cash_amount && (
@@ -1546,10 +1859,10 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                                 name="bank_amount"
                                                 value={formData.bank_amount || ''}
                                                 onChange={handleInputChange}
-                                                placeholder="Bank amount"
+                                                placeholder={!isDateSelected ? "Select date first" : "Bank amount"}
                                                 className="pl-8 w-full bg-transparent border-none py-2 text-sm text-gray-700 focus:ring-0 font-medium"
                                                 min="0"
-                                                disabled={submitting}
+                                                disabled={submitting || !isDateSelected}
                                             />
                                         </div>
                                         {errors.bank_amount && (
@@ -1579,10 +1892,10 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
                                             name="amount"
                                             value={formData.amount || ''}
                                             onChange={handleInputChange}
-                                            placeholder="0.00"
+                                            placeholder={!isDateSelected ? "Select date first" : "0.00"}
                                             className="pl-8 w-full bg-transparent border-none py-2 text-sm text-gray-700 focus:ring-0 font-medium"
                                             min="0"
-                                            disabled={submitting}
+                                            disabled={submitting || !isDateSelected}
                                         />
                                     </div>
                                     {errors.amount && (

@@ -536,7 +536,6 @@ export default function LedgerSnapshots() {
                                                             <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">O.B</th>
                                                             <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Recep. During the Month</th>
                                                             <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">C. Total</th>
-
                                                             <th className="border border-gray-200 bg-gray-50 text-left px-3 py-2 text-xs font-medium text-gray-600">Ledger Head</th>
                                                             <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Amount</th>
                                                             <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Balance</th>
@@ -562,7 +561,7 @@ export default function LedgerSnapshots() {
 
                                                                 rows.push(
                                                                     <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                                                                        {/* Credit Head Side */}
+                                                                        {/* Credit Head - First 4 columns */}
                                                                         <td className="border border-gray-200 px-3 py-2 text-sm">
                                                                             {creditHead ? creditHead.ledgerHead?.name || 'Unknown' : ''}
                                                                         </td>
@@ -573,35 +572,38 @@ export default function LedgerSnapshots() {
                                                                             {creditHead ? formatCurrency(creditHead.receipts) : ''}
                                                                         </td>
                                                                         <td className="border border-gray-200 px-3 py-2 text-right text-sm font-medium">
-                                                                            {creditHead ? formatCurrency(creditHead.closing_balance) : ''}
+                                                                            {creditHead ? formatCurrency(parseFloat(creditHead.opening_balance || 0) + parseFloat(creditHead.receipts || 0)) : ''}
                                                                         </td>
 
-                                                                        {/* Debit Head Side */}
+                                                                        {/* Debit Head - Next 2 columns */}
                                                                         <td className="border border-gray-200 px-3 py-2 text-sm">
                                                                             {debitHead ? debitHead.ledgerHead?.name || 'Unknown' : ''}
                                                                         </td>
                                                                         <td className="border border-gray-200 px-3 py-2 text-right text-sm text-red-600 font-medium">
-                                                                            {debitHead ? formatCurrency(Math.abs(parseFloat(debitHead.payments))) : ''}
+                                                                            {debitHead ? formatCurrency(parseFloat(debitHead.receipts || 0)) : ''}
+                                                                        </td>
+
+                                                                        {/* Credit Head - Last 3 columns */}
+                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm font-medium">
+                                                                            {creditHead ? formatCurrency(creditHead.closing_balance || 0) : ''}
                                                                         </td>
                                                                         <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {/* Empty balance column for debit heads */}
+                                                                            {creditHead ? formatCurrency(creditHead.cash_in_bank || 0) : ''}
                                                                         </td>
                                                                         <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {/* Empty bank column for debit heads */}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {/* Empty cash column for debit heads */}
+                                                                            {creditHead ? formatCurrency(creditHead.cash_in_hand || 0) : ''}
                                                                         </td>
                                                                     </tr>
                                                                 );
                                                             }
 
-                                                            // Add totals row
-                                                            const creditTotal = creditHeads.reduce((sum, head) => sum + parseFloat(head.closing_balance || 0), 0);
-                                                            const debitTotal = debitHeads.reduce((sum, head) => sum + Math.abs(parseFloat(head.payments || 0)), 0);
+                                                                                                        // Add totals row
+                                            const creditTotal = creditHeads.reduce((sum, head) => sum + (parseFloat(head.opening_balance || 0) + parseFloat(head.receipts || 0)), 0);
+                                            const debitTotal = debitHeads.reduce((sum, head) => sum + parseFloat(head.receipts || 0), 0);
 
                                                             rows.push(
                                                                 <tr key="totals" className="font-bold bg-gray-100">
+                                                                    {/* Credit totals - First 4 columns */}
                                                                     <td className="border border-gray-200 px-3 py-2">Total (T1)</td>
                                                                     <td className="border border-gray-200 px-3 py-2 text-right">
                                                                         {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.opening_balance || 0), 0))}
@@ -613,18 +615,21 @@ export default function LedgerSnapshots() {
                                                                         {formatCurrency(creditTotal)}
                                                                     </td>
 
+                                                                    {/* Debit totals - Next 2 columns */}
                                                                     <td className="border border-gray-200 px-3 py-2">Total</td>
                                                                     <td className="border border-gray-200 px-3 py-2 text-right text-red-700">
                                                                         {formatCurrency(debitTotal)}
                                                                     </td>
+
+                                                                    {/* Credit totals - Last 3 columns */}
                                                                     <td className="border border-gray-200 px-3 py-2 text-right font-medium">
-                                                                        {formatCurrency(creditTotal - debitTotal)}
+                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.closing_balance || 0), 0))}
                                                                     </td>
                                                                     <td className="border border-gray-200 px-3 py-2 text-right">
-                                                                        {formatCurrency(monthlyData[month]?.totals.cashInBank || 0)}
+                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.cash_in_bank || 0), 0))}
                                                                     </td>
                                                                     <td className="border border-gray-200 px-3 py-2 text-right">
-                                                                        {formatCurrency(monthlyData[month]?.totals.cashInHand || 0)}
+                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.cash_in_hand || 0), 0))}
                                                                     </td>
                                                                 </tr>
                                                             );

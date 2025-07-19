@@ -66,6 +66,11 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     const [showAdminOverrideModal, setShowAdminOverrideModal] = useState(false);
     const [isAdmin, setIsAdmin] = useState(true); // In a real app, this would come from auth
 
+    // Historical balance state for date-first workflow
+    const [historicalBalances, setHistoricalBalances] = useState([]);
+    const [balancesLoading, setBalancesLoading] = useState(false);
+    const [dateSelected, setDateSelected] = useState(false);
+
     // Configure axios
     const api = axios.create({
         baseURL: API_CONFIG.BASE_URL,
@@ -94,6 +99,94 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, []);
+
+    // Fetch historical balances for selected date
+    const fetchHistoricalBalances = async (accountId, date) => {
+        if (!accountId || !date) return;
+        
+        setBalancesLoading(true);
+        try {
+            const response = await api.get(`/transactions/snapshot?account_id=${accountId}&date=${date}`);
+            
+            if (response.data.success) {
+                setHistoricalBalances(response.data.data);
+                toast.success('Historical balances loaded successfully');
+            } else {
+                toast.error('Failed to load historical balances');
+                setHistoricalBalances([]);
+            }
+        } catch (error) {
+            console.error('Error fetching historical balances:', error);
+            toast.error('Unable to load historical balances');
+            setHistoricalBalances([]);
+        } finally {
+            setBalancesLoading(false);
+        }
+    };
+
+    // Handle date change - core of date-first workflow
+    const handleDateChange = async (e) => {
+        const selectedDate = e.target.value;
+        setFormData(prev => ({ 
+            ...prev, 
+            tx_date: selectedDate,
+            source_ledger_head_id: '', // Reset ledger selections
+            ledger_head_id: '',
+            amount: '',
+            cash_amount: '',
+            bank_amount: ''
+        }));
+        
+        setDateSelected(!!selectedDate);
+        
+        if (selectedDate && formData.account_id) {
+            await fetchHistoricalBalances(formData.account_id, selectedDate);
+        } else {
+            setHistoricalBalances([]);
+        }
+    };
+
+    // Get historical balance for a specific ledger head
+    const getHistoricalBalance = (ledgerHeadId) => {
+        return historicalBalances.find(balance => balance.ledger_head_id === ledgerHeadId);
+    };
+
+    // Balance Display Component for historical balances
+    const BalanceDisplay = ({ ledgerHeadId, label }) => {
+        const balance = getHistoricalBalance(ledgerHeadId);
+        
+        if (balancesLoading) {
+            return (
+                <div className="text-sm text-gray-500">
+                    <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse mr-1"></span>
+                    Loading balance...
+                </div>
+            );
+        }
+        
+        if (!balance) {
+            return (
+                <div className="text-sm text-gray-400">
+                    Select date to see balance
+                </div>
+            );
+        }
+        
+        const isBackdated = new Date(formData.tx_date) < new Date().setHours(0,0,0,0);
+        
+        return (
+            <div className="text-sm space-y-1">
+                <div className={`font-medium ${isBackdated ? 'text-amber-600' : 'text-green-600'}`}>
+                    {isBackdated && '📅 '} ₹{balance.closing_balance.toFixed(2)}
+                    {isBackdated && <span className="text-xs text-amber-500 ml-1">(as of {formData.tx_date})</span>}
+                </div>
+                <div className="text-xs text-gray-500 space-x-2">
+                    <span>Cash: ₹{balance.cash_balance.toFixed(2)}</span>
+                    <span>Bank: ₹{balance.bank_balance.toFixed(2)}</span>
+                </div>
+            </div>
+        );
+    };
 
     // Fetch accounts and ledger heads
     useEffect(() => {
@@ -469,6 +562,53 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Debit ledger head is required';
         if (!formData.tx_date) newErrors.tx_date = 'Date is required';
         if (!formData.voucher_number) newErrors.voucher_number = 'Voucher number is required';
+        
+        // Historical balance validation for debit transactions
+        if (formData.source_ledger_head_id && (formData.amount || formData.cash_amount || formData.bank_amount)) {
+            const historicalBalance = getHistoricalBalance(formData.source_ledger_head_id);
+            
+            if (historicalBalance) {
+                const totalAmount = formData.cash_type === 'multiple' 
+                    ? (parseFloat(formData.cash_amount) || 0) + (parseFloat(formData.bank_amount) || 0)
+                    : parseFloat(formData.amount) || 0;
+                
+                const cashAmount = formData.cash_type === 'multiple' 
+                    ? parseFloat(formData.cash_amount) || 0
+                    : (formData.cash_type === 'cash' ? totalAmount : 0);
+                
+                const bankAmount = formData.cash_type === 'multiple' 
+                    ? parseFloat(formData.bank_amount) || 0
+                    : (formData.cash_type === 'bank' ? totalAmount : 0);
+                
+                // Check if sufficient balance exists as of selected date
+                if (totalAmount > historicalBalance.closing_balance) {
+                    if (formData.cash_type === 'multiple') {
+                        newErrors.cash_amount = `Insufficient balance. Available: ₹${historicalBalance.closing_balance.toFixed(2)} as of ${formData.tx_date}`;
+                        newErrors.bank_amount = `Insufficient balance. Available: ₹${historicalBalance.closing_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    } else {
+                        newErrors.amount = `Insufficient balance. Available: ₹${historicalBalance.closing_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    }
+                }
+                
+                // Check cash balance if using cash
+                if (cashAmount > 0 && cashAmount > historicalBalance.cash_balance) {
+                    if (formData.cash_type === 'multiple') {
+                        newErrors.cash_amount = `Insufficient cash. Available: ₹${historicalBalance.cash_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    } else {
+                        newErrors.amount = `Insufficient cash. Available: ₹${historicalBalance.cash_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    }
+                }
+                
+                // Check bank balance if using bank
+                if (bankAmount > 0 && bankAmount > historicalBalance.bank_balance) {
+                    if (formData.cash_type === 'multiple') {
+                        newErrors.bank_amount = `Insufficient bank balance. Available: ₹${historicalBalance.bank_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    } else {
+                        newErrors.amount = `Insufficient bank balance. Available: ₹${historicalBalance.bank_balance.toFixed(2)} as of ${formData.tx_date}`;
+                    }
+                }
+            }
+        }
 
         // Validate voucher format if manual
         if (formData.manual_voucher && formData.voucher_number) {
@@ -1079,7 +1219,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             {errors.account_id && <p className="text-red-500 text-xs mt-2 error-message">{errors.account_id}</p>}
                         </div>
 
-                        {/* Source Ledger Head (Credit) */}
+                        {/* Source Ledger Head (Credit) - DISABLED until date selected */}
                         <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
                             <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center">
                                 <span className="bg-green-100 text-green-700 p-1 rounded-full mr-2">
@@ -1091,13 +1231,19 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </label>
                             <div className="relative" ref={sourceLedgerDropdownRef}>
                                 <div
-                                    className={`border-2 border-green-100 hover:border-green-300 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${!formData.account_id ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                    onClick={() => formData.account_id && setIsSourceLedgerDropdownOpen(!isSourceLedgerDropdownOpen)}
+                                    className={`border-2 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${
+                                        !dateSelected 
+                                            ? 'opacity-60 cursor-not-allowed border-gray-200 bg-gray-50' 
+                                            : 'border-green-100 hover:border-green-300'
+                                    }`}
+                                    onClick={() => dateSelected && formData.account_id && setIsSourceLedgerDropdownOpen(!isSourceLedgerDropdownOpen)}
                                 >
                                     <span className="font-medium text-gray-800">
-                                        {formData.source_ledger_head_id
-                                            ? ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || 'Select Credit Head'
-                                            : 'Select Credit Head'
+                                        {!dateSelected 
+                                            ? 'Select date first'
+                                            : formData.source_ledger_head_id
+                                                ? ledgerHeads.find(h => h.id.toString() === formData.source_ledger_head_id)?.name || 'Select Credit Head'
+                                                : 'Select Credit Head'
                                         }
                                     </span>
                                     <svg className={`w-4 h-4 text-green-500 transition-transform duration-200 ${isSourceLedgerDropdownOpen ? 'transform rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1143,9 +1289,19 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 )}
                             </div>
                             {errors.source_ledger_head_id && <p className="text-red-500 text-xs mt-2 error-message">{errors.source_ledger_head_id}</p>}
+                            
+                            {/* Historical Balance Display */}
+                            {formData.source_ledger_head_id && dateSelected && (
+                                <div className="mt-3 p-3 bg-green-50 rounded border">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm font-medium text-gray-700">Available Balance:</span>
+                                        <BalanceDisplay ledgerHeadId={formData.source_ledger_head_id} />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        {/* Destination Ledger Head (Debit) */}
+                        {/* Destination Ledger Head (Debit) - DISABLED until date selected */}
                         <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm transition-all duration-200 hover:shadow-md">
                             <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center">
                                 <span className="bg-purple-100 text-purple-700 p-1 rounded-full mr-2">
@@ -1157,13 +1313,19 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </label>
                             <div className="relative" ref={debitLedgerDropdownRef}>
                                 <div
-                                    className={`border-2 border-purple-100 hover:border-purple-300 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${!formData.account_id ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                    onClick={() => formData.account_id && setIsDebitLedgerDropdownOpen(!isDebitLedgerDropdownOpen)}
+                                    className={`border-2 rounded-lg p-2.5 flex justify-between items-center cursor-pointer bg-white shadow-sm transition-all duration-200 ${
+                                        !dateSelected 
+                                            ? 'opacity-60 cursor-not-allowed border-gray-200 bg-gray-50' 
+                                            : 'border-purple-100 hover:border-purple-300'
+                                    }`}
+                                    onClick={() => dateSelected && formData.account_id && setIsDebitLedgerDropdownOpen(!isDebitLedgerDropdownOpen)}
                                 >
                                     <span className="font-medium text-gray-800">
-                                        {formData.ledger_head_id
-                                            ? ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || 'Select Debit Head'
-                                            : 'Select Debit Head'
+                                        {!dateSelected 
+                                            ? 'Select date first'
+                                            : formData.ledger_head_id
+                                                ? ledgerHeads.find(h => h.id.toString() === formData.ledger_head_id)?.name || 'Select Debit Head'
+                                                : 'Select Debit Head'
                                         }
                                     </span>
                                     <svg className={`w-4 h-4 text-purple-500 transition-transform duration-200 ${isDebitLedgerDropdownOpen ? 'transform rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1229,14 +1391,15 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             </span>
                             Payment Method <span className="text-red-500 ml-1">*</span>
                         </label>
-                        <div className="grid grid-cols-4 gap-4">
-                            <label className="payment-option cursor-pointer">
+                        <div className={`grid grid-cols-4 gap-4 ${!dateSelected ? 'opacity-60 pointer-events-none' : ''}`}>
+                            <label className={`payment-option ${!dateSelected ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                 <input
                                     type="radio"
                                     name="cash_type"
                                     value="cash"
                                     checked={formData.cash_type === 'cash'}
                                     onChange={handleInputChange}
+                                    disabled={!dateSelected}
                                     className="sr-only"
                                 />
                                 <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'cash'
@@ -1259,13 +1422,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             </label>
 
-                            <label className="payment-option cursor-pointer">
+                            <label className={`payment-option ${!dateSelected ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                 <input
                                     type="radio"
                                     name="cash_type"
                                     value="bank"
                                     checked={formData.cash_type === 'bank'}
                                     onChange={handleInputChange}
+                                    disabled={!dateSelected}
                                     className="sr-only"
                                 />
                                 <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'bank'
@@ -1288,13 +1452,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             </label>
 
-                            <label className="payment-option cursor-pointer">
+                            <label className={`payment-option ${!dateSelected ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                 <input
                                     type="radio"
                                     name="cash_type"
                                     value="multiple"
                                     checked={formData.cash_type === 'multiple'}
                                     onChange={handleInputChange}
+                                    disabled={!dateSelected}
                                     className="sr-only"
                                 />
                                 <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'multiple'
@@ -1317,13 +1482,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                 </div>
                             </label>
 
-                            <label className="payment-option cursor-pointer">
+                            <label className={`payment-option ${!dateSelected ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                 <input
                                     type="radio"
                                     name="cash_type"
                                     value="cheque"
                                     checked={formData.cash_type === 'cheque'}
                                     onChange={handleInputChange}
+                                    disabled={!dateSelected}
                                     className="sr-only"
                                 />
                                 <div className={`h-full flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-300 ${formData.cash_type === 'cheque'
@@ -1368,6 +1534,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                         name="cash_amount"
                                         value={formData.cash_amount || ''}
                                         onChange={handleInputChange}
+                                        disabled={!dateSelected}
                                         onBlur={(e) => {
                                             if (e.target.value) {
                                                 const error = validateAmount('cash', e.target.value);
@@ -1376,8 +1543,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                                 setErrors(prev => ({ ...prev, cash_amount: 'At least one amount is required' }));
                                             }
                                         }}
-                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.cash_amount ? 'border-red-300 bg-red-50' : 'border-green-200 focus:border-green-500 bg-green-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-green-200 transition-all duration-200`}
-                                        placeholder="Enter cash amount"
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl transition-all duration-200 ${
+                                            !dateSelected 
+                                                ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-200' 
+                                                : errors.cash_amount 
+                                                    ? 'border-red-300 bg-red-50' 
+                                                    : 'border-green-200 focus:border-green-500 bg-green-50 bg-opacity-30'
+                                        } focus:outline-none focus:ring-2 focus:ring-green-200`}
+                                        placeholder={!dateSelected ? "Select date first" : "Enter cash amount"}
                                     />
                                 </div>
                                 {errors.cash_amount && (
@@ -1406,6 +1579,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                         name="bank_amount"
                                         value={formData.bank_amount || ''}
                                         onChange={handleInputChange}
+                                        disabled={!dateSelected}
                                         onBlur={(e) => {
                                             if (e.target.value) {
                                                 const error = validateAmount('bank', e.target.value);
@@ -1414,8 +1588,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                                 setErrors(prev => ({ ...prev, bank_amount: 'At least one amount is required' }));
                                             }
                                         }}
-                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.bank_amount ? 'border-red-300 bg-red-50' : 'border-blue-200 focus:border-blue-500 bg-blue-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all duration-200`}
-                                        placeholder="Enter bank amount"
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl transition-all duration-200 ${
+                                            !dateSelected 
+                                                ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-200' 
+                                                : errors.bank_amount 
+                                                    ? 'border-red-300 bg-red-50' 
+                                                    : 'border-blue-200 focus:border-blue-500 bg-blue-50 bg-opacity-30'
+                                        } focus:outline-none focus:ring-2 focus:ring-blue-200`}
+                                        placeholder={!dateSelected ? "Select date first" : "Enter bank amount"}
                                     />
                                 </div>
                                 {errors.bank_amount && (
@@ -1448,6 +1628,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                         name="amount"
                                         value={formData.amount || ''}
                                         onChange={handleInputChange}
+                                        disabled={!dateSelected}
                                         onBlur={(e) => {
                                             if (!e.target.value || parseFloat(e.target.value) <= 0) {
                                                 setErrors(prev => ({ ...prev, amount: 'Amount must be greater than zero' }));
@@ -1457,8 +1638,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                                 setErrors(prev => ({ ...prev, amount: error }));
                                             }
                                         }}
-                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl ${errors.amount ? 'border-red-300 bg-red-50' : 'border-amber-200 focus:border-amber-500 bg-amber-50 bg-opacity-30'} focus:outline-none focus:ring-2 focus:ring-amber-200 transition-all duration-200`}
-                                        placeholder="Enter cheque amount"
+                                        className={`w-full pl-10 pr-4 py-3.5 border-2 text-lg rounded-xl transition-all duration-200 ${
+                                            !dateSelected 
+                                                ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-200' 
+                                                : errors.amount 
+                                                    ? 'border-red-300 bg-red-50' 
+                                                    : 'border-amber-200 focus:border-amber-500 bg-amber-50 bg-opacity-30'
+                                        } focus:outline-none focus:ring-2 focus:ring-amber-200`}
+                                        placeholder={!dateSelected ? "Select date first" : "Enter cheque amount"}
                                     />
                                 </div>
                                 {errors.amount && (
@@ -1680,11 +1867,12 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             )}
                         </div>
 
-                        {/* Transaction Date */}
-                        <div>
-                            <label htmlFor="tx_date" className="block text-xs font-medium text-gray-700 mb-1">
-                                <FaCalendarAlt className="inline mr-2 text-gray-500 w-3 h-3" />
-                                Transaction Date *
+                        {/* TRANSACTION DATE - FIRST CONTROL */}
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 mb-6">
+                            <label htmlFor="tx_date" className="block text-lg font-bold text-blue-800 mb-3 flex items-center">
+                                <FaCalendarAlt className="inline mr-3 text-blue-600 w-5 h-5" />
+                                Transaction Date <span className="text-red-500 ml-1">*</span>
+                                {!dateSelected && <span className="text-blue-600 text-sm ml-3 font-medium">(Select First)</span>}
                             </label>
                             <div className="relative">
                                 <input
@@ -1692,29 +1880,33 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                                     type="date"
                                     name="tx_date"
                                     value={formData.tx_date}
-                                    onChange={handleInputChange}
-                                    className={`w-full p-2 border ${errors.tx_date ? 'border-red-500' : 'border-gray-300'} rounded-md`}
+                                    onChange={handleDateChange}
+                                    className={`w-full p-4 text-lg border-2 rounded-lg focus:ring-4 focus:ring-blue-300 transition-all ${
+                                        !dateSelected ? 'border-blue-300 bg-blue-50' : 'border-gray-300 bg-white'
+                                    } ${errors.tx_date ? 'border-red-500' : ''}`}
                                     aria-invalid={!!errors.tx_date}
                                     aria-describedby={errors.tx_date ? "date_error" : undefined}
+                                    required
                                 />
                                 <button
                                     type="button"
                                     onClick={() => {
                                         const today = new Date().toISOString().split('T')[0];
-                                        setFormData(prev => ({ ...prev, tx_date: today }));
+                                        const e = { target: { value: today } };
+                                        handleDateChange(e);
                                     }}
-                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded"
+                                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded-md font-medium"
                                 >
                                     Today
                                 </button>
                                 {/* Display formatted date for better readability */}
                                 {formData.tx_date && (
-                                    <div className="text-xs mt-1 text-gray-500">
-                                        {new Date(formData.tx_date).toLocaleDateString('en-IN', {
+                                    <div className="text-sm mt-2 text-blue-600 font-medium">
+                                        Selected: {new Date(formData.tx_date).toLocaleDateString('en-IN', {
                                             day: '2-digit',
-                                            month: '2-digit',
+                                            month: 'long',
                                             year: 'numeric'
-                                        }).replace(/\//g, '-')}
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -1761,7 +1953,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         <button
                             type="submit"
                             className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl text-white flex items-center font-medium shadow-md hover:shadow-lg transition-all duration-200"
-                            disabled={submitting}
+                            disabled={submitting || !dateSelected}
                         >
                             {submitting ? (
                                 <div className="flex items-center">

@@ -3,9 +3,6 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/ledger-snapshots": "pages/ledger-snapshots.js",
-  "/transactions": "pages/transactions.js",
   "/period-management": "pages/period-management.js",
-  "/profile": "pages/profile.js",
-  "/": "pages/index.js",
-  "/dashboard": "pages/dashboard.js"
+  "/transactions": "pages/transactions.js"
 }

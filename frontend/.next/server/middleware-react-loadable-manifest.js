@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST="{\"pages\\\\_app.js -> react-toastify\":{\"id\":\"pages\\\\_app.js -> react-toastify\",\"files\":[\"static/chunks/node_modules_react-toastify_dist_index_mjs.js\"]}}"
+self.__REACT_LOADABLE_MANIFEST="{\"pages/_app.js -> react-toastify\":{\"id\":\"pages/_app.js -> react-toastify\",\"files\":[\"static/chunks/node_modules_react-toastify_dist_index_mjs.js\"]}}"
