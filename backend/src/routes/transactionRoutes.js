@@ -12,6 +12,8 @@ router.post('/debit', protect, transactionController.createDebit);
 
 // Get data
 router.get('/balances/date', protect, transactionController.getBalancesForDate);
+router.get('/snapshot', protect, transactionController.getSnapshotForDate);
+router.get('/snapshot/ledger', protect, transactionController.getLedgerSnapshotForDate);
 router.get('/', protect, transactionController.getTransactions);
 router.get('/:id', protect, transactionController.getTransactionById);
 

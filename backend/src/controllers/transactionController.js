@@ -1,4 +1,5 @@
 const transactionService = require('../services/transactionService');
+const snapshotService = require('../services/snapshotService');
 const db = require('../models');
 const monthlyClosureService = require('../services/monthlyClosureService');
 
@@ -603,6 +604,120 @@ class TransactionController {
             return res.status(500).json({
                 success: false,
                 message: error.message || 'Error updating transaction'
+            });
+        }
+    }
+
+    /**
+     * Get historical snapshot of all ledger heads as of a specific date
+     * This is the core endpoint for the period-based accounting system
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    async getSnapshotForDate(req, res) {
+        try {
+            const { account_id, date } = req.query;
+
+            // Validate required parameters
+            if (!account_id || !date) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'account_id and date parameters are required'
+                });
+            }
+
+            // Validate account exists
+            const account = await db.Account.findByPk(account_id);
+            if (!account) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Account not found'
+                });
+            }
+
+            // Validate date format
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(date)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Date must be in YYYY-MM-DD format'
+                });
+            }
+
+            // Get snapshot data using the snapshot service
+            const snapshotData = await snapshotService.snapshotForDate(account_id, date);
+
+            return res.status(200).json({
+                success: true,
+                data: snapshotData,
+                metadata: {
+                    account_id: parseInt(account_id),
+                    snapshot_date: date,
+                    account_name: account.name,
+                    total_ledgers: snapshotData.length
+                }
+            });
+        } catch (error) {
+            console.error('Error getting snapshot for date:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Error retrieving historical snapshot',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get historical snapshot for a specific ledger head as of a specific date
+     * @param {Object} req - Express request object  
+     * @param {Object} res - Express response object
+     */
+    async getLedgerSnapshotForDate(req, res) {
+        try {
+            const { account_id, ledger_head_id, date } = req.query;
+
+            // Validate required parameters
+            if (!account_id || !ledger_head_id || !date) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'account_id, ledger_head_id and date parameters are required'
+                });
+            }
+
+            // Validate date format
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(date)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Date must be in YYYY-MM-DD format'
+                });
+            }
+
+            // Get single ledger snapshot
+            const snapshot = await snapshotService.snapshotForLedgerAtDate(account_id, ledger_head_id, date);
+
+            if (!snapshot) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Ledger head not found or no balance data available for the specified date'
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: snapshot,
+                metadata: {
+                    account_id: parseInt(account_id),
+                    ledger_head_id: parseInt(ledger_head_id),
+                    snapshot_date: date
+                }
+            });
+        } catch (error) {
+            console.error('Error getting ledger snapshot for date:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Error retrieving historical ledger snapshot',
+                error: error.message
             });
         }
     }

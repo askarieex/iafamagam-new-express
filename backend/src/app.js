@@ -1,3 +1,17 @@
+const express = require('express');
+const cors = require('cors');
+const app = express();
+
+// CORS configuration
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://192.168.1.2:3000'],
+  credentials: true
+}));
+
+// Body parser middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
