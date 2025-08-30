@@ -403,19 +403,28 @@ exports.getOpenPeriod = async (req, res) => {
             // Auto-open the current month
             const autoOpenResult = await exports.ensureCurrentPeriodOpen(parseInt(account_id));
 
-            if (autoOpenResult.success && autoOpenResult.autoOpened) {
-                // Successfully auto-opened the current month
+            if (autoOpenResult.success) {
+                // Successfully found or auto-opened a period
                 return res.status(200).json({
                     success: true,
-                    message: 'Current month auto-opened',
+                    message: autoOpenResult.autoOpened ? 'Current month auto-opened' : 'Found existing open period',
                     data: autoOpenResult.openPeriod
                 });
             } else {
-                // Failed to auto-open
-                return res.status(404).json({
-                    success: false,
-                    message: 'No open period found for this account and auto-open failed',
-                    data: { account_id: parseInt(account_id) }
+                // Failed to auto-open, but still return current month as fallback
+                const currentDate = new Date();
+                const currentMonth = currentDate.getMonth() + 1;
+                const currentYear = currentDate.getFullYear();
+                
+                console.log(`Auto-open failed, returning current month (${currentMonth}/${currentYear}) as fallback`);
+                return res.status(200).json({
+                    success: true,
+                    message: 'Using current month as default open period',
+                    data: {
+                        account_id: parseInt(account_id),
+                        month: currentMonth,
+                        year: currentYear
+                    }
                 });
             }
         }
@@ -736,18 +745,18 @@ async function manuallyOpenPeriod(accountId, month, year) {
                 { replacements: [isOpen, accountId, ledger.id, month, year] }
             );
         } else {
-            // Calculate the previous month and year
-            const prevMonth = month === 1 ? 12 : month - 1;
-            const prevYear = month === 1 ? year - 1 : year;
-
-            // Find previous month's record to get closing balance
+            // FIXED: Use the correct filter to find previous period
+            // Find the most recent period BEFORE the one being opened
             const prevRecord = await db.MonthlyLedgerBalance.findOne({
                 where: {
                     account_id: accountId,
                     ledger_head_id: ledger.id,
-                    month: prevMonth,
-                    year: prevYear
-                }
+                    [Op.or]: [
+                        { year: { [Op.lt]: year } },                  // Any month from earlier years
+                        { year, month: { [Op.lt]: month } }           // Earlier month same year
+                    ]
+                },
+                order: [['year', 'DESC'], ['month', 'DESC']],         // Get the most recent one
             });
 
             // Use previous month's closing balance or calculate from transactions
@@ -756,7 +765,7 @@ async function manuallyOpenPeriod(accountId, month, year) {
             if (prevRecord) {
                 // Use previous month's closing balance
                 openingBalance = parseFloat(prevRecord.closing_balance);
-                console.log(`Using previous month's closing balance: ${openingBalance}`);
+                console.log(`Using previous month's (${prevRecord.month}/${prevRecord.year}) closing balance: ${openingBalance}`);
             } else {
                 // Calculate from transactions prior to this month
                 const startDate = new Date(year, month - 1, 1);
@@ -780,6 +789,8 @@ async function manuallyOpenPeriod(accountId, month, year) {
                 if (priorTransactions && priorTransactions[0] && priorTransactions[0].balance !== null) {
                     openingBalance = parseFloat(priorTransactions[0].balance || 0);
                     console.log(`Calculated opening balance from historical transactions: ${openingBalance}`);
+                } else {
+                    console.log('No prior transactions found, using 0 as opening balance');
                 }
             }
 
@@ -800,6 +811,8 @@ async function manuallyOpenPeriod(accountId, month, year) {
                     ]
                 }
             );
+            
+            console.log(`Created new period for ${month}/${year} with opening balance ${openingBalance}`);
         }
 
         // After processing the first ledger, set this to false for the rest

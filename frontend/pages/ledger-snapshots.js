@@ -138,15 +138,31 @@ export default function LedgerSnapshots() {
                 if (openPeriod.year === selectedYear) {
                     statuses[openPeriod.month] = true; // Only this period is open
                 }
+            } else {
+                // If no open period found, check if current month should be open
+                const currentDate = new Date();
+                const currentMonth = currentDate.getMonth() + 1;
+                const currentYear = currentDate.getFullYear();
+                
+                // If we're viewing the current year, mark current month as open
+                if (selectedYear === currentYear) {
+                    console.log(`No open period found, but marking current month (${currentMonth}) as open for year ${currentYear}`);
+                    statuses[currentMonth] = true;
+                }
             }
 
             setPeriodStatuses(statuses);
         } catch (err) {
             console.error('Error checking period status:', err);
-            // Default all to closed if we can't determine
+            // Default behavior: if we're viewing current year, mark current month as open
             const statuses = {};
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth() + 1;
+            const currentYear = currentDate.getFullYear();
+            
             for (let month = 1; month <= 12; month++) {
-                statuses[month] = false;
+                // Mark current month as open if viewing current year
+                statuses[month] = (selectedYear === currentYear && month === currentMonth);
             }
             setPeriodStatuses(statuses);
         }

@@ -1,31 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
     FaChartLine,
     FaSearch,
     FaFileDownload,
+    FaAngleDown,
+    FaAngleUp,
     FaLock,
-    FaLockOpen,
-    FaFilter,
-    FaFileAlt,
-    FaPlus,
-    FaMinus,
-    FaAngleRight,
-    FaAngleDown
+    FaLockOpen
 } from 'react-icons/fa';
 import API_CONFIG from '../config';
 
+// Create a shared state for data refresh
+let refreshCallbacks = [];
+
+// Function to trigger refresh from outside this component
+export const refreshMonthlySnapshots = () => {
+    // Always use forceRefresh=true when refreshing from external components
+    refreshCallbacks.forEach(callback => callback(true));
+};
+
 export default function MonthlySnapshots() {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
     const [accounts, setAccounts] = useState([]);
     const [selectedAccountId, setSelectedAccountId] = useState('');
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
     const [monthlyData, setMonthlyData] = useState({});
     const [expandedMonths, setExpandedMonths] = useState({});
+    const [activeFilter, setActiveFilter] = useState('all');
     const [periodStatuses, setPeriodStatuses] = useState({});
-    const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'open', 'closed'
     const [yearTotals, setYearTotals] = useState({
         receipts: 0,
         payments: 0,
@@ -34,18 +39,74 @@ export default function MonthlySnapshots() {
         bank: 0
     });
 
-    // Fetch accounts on page load
+    // Define fetchMonthlyData as a useCallback so we can add it to refreshCallbacks
+    const fetchMonthlyData = useCallback(async (forceRefresh = false) => {
+        if (!selectedAccountId) return;
+        
+        setLoading(true);
+        setError(null);
+
+        try {
+            // Add a cache-busting parameter when forceRefresh is true
+            const cacheParam = forceRefresh ? `&_t=${new Date().getTime()}` : '';
+            
+            // Fetch all months for the selected year
+            const monthData = {};
+
+            for (let month = 1; month <= 12; month++) {
+                const response = await axios.get(
+                    `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-ledger-balances${cacheParam}`,
+                    {
+                        params: {
+                            account_id: selectedAccountId,
+                            month: month,
+                            year: selectedYear
+                        }
+                    }
+                );
+
+                if (response.data.success) {
+                    monthData[month] = {
+                        balances: response.data.data,
+                        totals: calculateMonthTotals(response.data.data)
+                    };
+                } else {
+                    monthData[month] = {
+                        balances: [],
+                        totals: { receipts: 0, payments: 0, balance: 0, cashInHand: 0, cashInBank: 0 }
+                    };
+                }
+            }
+
+            setMonthlyData(monthData);
+        } catch (err) {
+            setError(err.response?.data?.message || err.message || 'An error occurred');
+            toast.error('Error loading monthly data');
+        } finally {
+            setLoading(false);
+        }
+    }, [selectedAccountId, selectedYear]);
+
+    // Setup the refresh callback
+    useEffect(() => {
+        refreshCallbacks.push(fetchMonthlyData);
+        return () => {
+            refreshCallbacks = refreshCallbacks.filter(cb => cb !== fetchMonthlyData);
+        };
+    }, [fetchMonthlyData]);
+
+    // Fetch accounts on mount
     useEffect(() => {
         fetchAccounts();
     }, []);
 
-    // Fetch data when selection changes
+    // Fetch data when account or year changes
     useEffect(() => {
-        if (selectedAccountId && selectedYear) {
-            fetchMonthlyData();
+        if (selectedAccountId) {
             fetchPeriodStatuses();
+            fetchMonthlyData();
         }
-    }, [selectedAccountId, selectedYear]);
+    }, [selectedAccountId, selectedYear, fetchMonthlyData]);
 
     // Calculate year totals when monthly data changes
     useEffect(() => {
@@ -75,85 +136,55 @@ export default function MonthlySnapshots() {
     // Fetch period closure status
     const fetchPeriodStatuses = async () => {
         try {
-            const response = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/status`
+            // First try to get the open period directly
+            const openPeriodResponse = await axios.get(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open-period`,
+                {
+                    params: {
+                        account_id: selectedAccountId
+                    }
+                }
             );
 
-            if (response.data.success) {
-                const accounts = response.data.data;
-                const selectedAccount = accounts.find(account => account.id === parseInt(selectedAccountId));
-
-                if (selectedAccount && selectedAccount.last_closed_date) {
-                    const lastClosedDate = new Date(selectedAccount.last_closed_date);
-                    const statuses = {};
-
-                    // For each month in the selected year, determine if it's open or closed
-                    for (let month = 1; month <= 12; month++) {
-                        const lastDayOfMonth = new Date(selectedYear, month, 0);
-                        statuses[month] = lastClosedDate < lastDayOfMonth;
-                    }
-
-                    setPeriodStatuses(statuses);
-                } else {
-                    // If no closed date, all periods are open
-                    const statuses = {};
-                    for (let month = 1; month <= 12; month++) {
-                        statuses[month] = true;
-                    }
-                    setPeriodStatuses(statuses);
-                }
-            }
-        } catch (err) {
-            console.error('Error checking period status:', err);
-            // Default to open if we can't determine
+            // Set all periods to closed by default
             const statuses = {};
             for (let month = 1; month <= 12; month++) {
-                statuses[month] = true;
+                statuses[month] = false;
             }
-            setPeriodStatuses(statuses);
-        }
-    };
 
-    // Fetch monthly data
-    const fetchMonthlyData = async () => {
-        setLoading(true);
-        setError(null);
-
-        try {
-            // Fetch all months for the selected year
-            const monthData = {};
-
-            for (let month = 1; month <= 12; month++) {
-                const response = await axios.get(
-                    `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-ledger-balances`,
-                    {
-                        params: {
-                            account_id: selectedAccountId,
-                            month: month,
-                            year: selectedYear
-                        }
-                    }
-                );
-
-                if (response.data.success) {
-                    monthData[month] = {
-                        balances: response.data.data,
-                        totals: calculateMonthTotals(response.data.data)
-                    };
-                } else {
-                    monthData[month] = {
-                        balances: [],
-                        totals: { receipts: 0, payments: 0, balance: 0, cashInHand: 0, cashInBank: 0 }
-                    };
+            // If we have an open period, mark only that one as open
+            if (openPeriodResponse.data.success && openPeriodResponse.data.data) {
+                const openPeriod = openPeriodResponse.data.data;
+                if (openPeriod.year === selectedYear) {
+                    statuses[openPeriod.month] = true;
+                }
+            } else {
+                // If no open period found, check if current month should be open
+                const currentDate = new Date();
+                const currentMonth = currentDate.getMonth() + 1;
+                const currentYear = currentDate.getFullYear();
+                
+                // If we're viewing the current year, mark current month as open
+                if (selectedYear === currentYear) {
+                    console.log(`No open period found, but marking current month (${currentMonth}) as open for year ${currentYear}`);
+                    statuses[currentMonth] = true;
                 }
             }
 
-            setMonthlyData(monthData);
+            setPeriodStatuses(statuses);
         } catch (err) {
-            setError(err.response?.data?.message || err.message || 'An error occurred');
-            toast.error('Error loading monthly data');
-        } finally {
-            setLoading(false);
+            console.error('Error checking period status:', err);
+            // Default behavior: if we're viewing current year, mark current month as open
+            const statuses = {};
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth() + 1;
+            const currentYear = currentDate.getFullYear();
+            
+            for (let month = 1; month <= 12; month++) {
+                // Mark current month as open if viewing current year
+                statuses[month] = (selectedYear === currentYear && month === currentMonth);
+            }
+            setPeriodStatuses(statuses);
         }
     };
 

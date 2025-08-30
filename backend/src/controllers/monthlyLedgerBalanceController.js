@@ -24,7 +24,8 @@ exports.getAllMonthlyBalances = async (req, res) => {
             whereCondition.year = year;
         }
 
-        const monthlyBalances = await db.MonthlyLedgerBalance.findAll({
+        // Get the monthly balances that match the criteria
+        let monthlyBalances = await db.MonthlyLedgerBalance.findAll({
             where: whereCondition,
             include: [
                 {
@@ -46,6 +47,61 @@ exports.getAllMonthlyBalances = async (req, res) => {
             ]
         });
 
+        // Special handling for month/year specific queries - CRITICAL FIX
+        // This ensures we handle opening balances correctly for historical periods
+        if (month && year && account_id) {
+            const targetMonth = parseInt(month);
+            const targetYear = parseInt(year);
+            
+            // Process each balance to ensure opening balances are correct
+            const processedBalances = [];
+            
+            for (const balance of monthlyBalances) {
+                // If this is an existing record with a valid opening balance, use it as is
+                if (balance.opening_balance !== null && balance.opening_balance !== undefined) {
+                    processedBalances.push(balance);
+                    continue;
+                }
+                
+                // Calculate proper opening balance from strictly earlier periods
+                const prevPeriod = await db.MonthlyLedgerBalance.findOne({
+                    where: {
+                        account_id: balance.account_id,
+                        ledger_head_id: balance.ledger_head_id,
+                        [Op.or]: [
+                            { year: { [Op.lt]: targetYear } },
+                            { year: targetYear, month: { [Op.lt]: targetMonth } }
+                        ]
+                    },
+                    order: [['year', 'DESC'], ['month', 'DESC']]
+                });
+                
+                // Clone the balance and adjust its opening balance
+                const processedBalance = {...balance.toJSON()};
+                if (prevPeriod) {
+                    processedBalance.opening_balance = prevPeriod.closing_balance;
+                    processedBalance.closing_balance = parseFloat(prevPeriod.closing_balance || 0) + 
+                                                       parseFloat(balance.receipts || 0) - 
+                                                       parseFloat(balance.payments || 0);
+                } else {
+                    // No previous period found, set opening balance to 0
+                    processedBalance.opening_balance = 0;
+                    processedBalance.closing_balance = parseFloat(balance.receipts || 0) - 
+                                                       parseFloat(balance.payments || 0);
+                }
+                
+                processedBalances.push(processedBalance);
+            }
+            
+            // Return the processed balances
+            return res.status(200).json({
+                success: true,
+                count: processedBalances.length,
+                data: processedBalances
+            });
+        }
+
+        // Standard response for non-month/year specific queries
         return res.status(200).json({
             success: true,
             count: monthlyBalances.length,

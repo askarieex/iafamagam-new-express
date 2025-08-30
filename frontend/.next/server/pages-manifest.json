@@ -3,6 +3,6 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/ledger-snapshots": "pages/ledger-snapshots.js",
-  "/period-management": "pages/period-management.js",
-  "/transactions": "pages/transactions.js"
+  "/transactions": "pages/transactions.js",
+  "/period-management": "pages/period-management.js"
 }

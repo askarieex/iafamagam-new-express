@@ -20,6 +20,8 @@ import {
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
+// Import the refresh function to update monthly snapshots grid
+import { refreshMonthlySnapshots } from '../../pages/monthly-snapshots';
 
 export default function CreditTransactionForm({ onSuccess, onCancel, transaction = null, isEditing = false }) {
     const [loading, setLoading] = useState(true);
@@ -1158,6 +1160,15 @@ export default function CreditTransactionForm({ onSuccess, onCancel, transaction
 
             // Check for successful response
             if (response.data && response.data.success) {
+                // Refresh the monthly snapshots if function exists
+                try {
+                    console.log('Refreshing monthly snapshots view...');
+                    refreshMonthlySnapshots();
+                } catch (refreshError) {
+                    console.error('Error refreshing monthly snapshots:', refreshError);
+                    // Non-critical error, don't show to user
+                }
+                
                 if (onSuccess) {
                     onSuccess(response.data.transaction || response.data.data);
                 }

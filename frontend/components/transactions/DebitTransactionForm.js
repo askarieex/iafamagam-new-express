@@ -15,6 +15,7 @@ import {
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
+import { refreshMonthlySnapshots } from '../../pages/monthly-snapshots';
 
 export default function DebitTransactionForm({ onSuccess, onCancel, transaction = null, isEditing = false }) {
     const [loading, setLoading] = useState(true);
@@ -714,6 +715,17 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         e.preventDefault();
 
         if (!validateForm()) {
+            // Show detailed error message
+            const missingFields = [];
+            if (!formData.account_id) missingFields.push('Account');
+            if (!formData.source_ledger_head_id) missingFields.push('Credit Ledger Head');
+            if (!formData.ledger_head_id) missingFields.push('Debit Ledger Head');
+            if (!formData.tx_date) missingFields.push('Transaction Date');
+            if (!formData.voucher_number) missingFields.push('Voucher Number');
+            if (!formData.amount && formData.cash_type !== 'multiple') missingFields.push('Amount');
+            if (formData.cash_type === 'multiple' && !formData.cash_amount && !formData.bank_amount) missingFields.push('Cash or Bank Amount');
+            
+            toast.error(`Please fill the following required fields: ${missingFields.join(', ')}`);
             return;
         }
 
@@ -741,94 +753,93 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     };
 
     const submitTransaction = async (adminOverride = false) => {
+        setSubmitting(true);
+
         try {
             let dataToSubmit = { ...formData };
-
+            
             if (adminOverride) {
                 dataToSubmit.admin_override = true;
             }
 
-            setSubmitting(true);
-            setError(null);
+            console.log('Submitting form data:', dataToSubmit);
 
-            // Prepare transaction data
-            const transactionData = {
-                account_id: parseInt(formData.account_id),
-                ledger_head_id: parseInt(formData.ledger_head_id),
-                amount: formData.cash_type === 'multiple'
-                    ? calculateTotalAmount()
-                    : parseFloat(formData.amount),
-                tx_type: 'debit',
-                cash_type: formData.cash_type,
-                tx_date: formData.tx_date,
-                description: formData.description || null,
-                voucher_number: formData.voucher_number,
-                manual_voucher: formData.manual_voucher
+            // Prepare data for API
+            const submitData = {
+                account_id: parseInt(dataToSubmit.account_id),
+                ledger_head_id: parseInt(dataToSubmit.ledger_head_id),
+                amount: parseFloat(dataToSubmit.amount),
+                cash_type: dataToSubmit.cash_type,
+                tx_date: dataToSubmit.tx_date,
+                description: dataToSubmit.description,
+                cheque_number: dataToSubmit.cheque_number || null,
+                cheque_date: dataToSubmit.cheque_date || null
             };
 
-            // For multiple cash type, add cash and bank amounts
-            if (formData.cash_type === 'multiple') {
-                transactionData.cash_amount = parseFloat(formData.cash_amount || 0);
-                transactionData.bank_amount = parseFloat(formData.bank_amount || 0);
+            // Add splits if present
+            if (dataToSubmit.splits && dataToSubmit.splits.length > 0) {
+                submitData.splits = dataToSubmit.splits.map(split => ({
+                    ledger_head_id: parseInt(split.ledger_head_id),
+                    amount: parseFloat(split.amount)
+                }));
             }
 
-            // For cheque type, add cheque details and set status to pending
-            if (formData.cash_type === 'cheque') {
-                transactionData.cheque_number = formData.cheque_number;
-                transactionData.bank_name = formData.bank_name;
-                transactionData.issue_date = formData.issue_date;
-                transactionData.due_date = formData.due_date;
-                transactionData.status = 'pending'; // Explicitly set status to pending for cheques
-            }
-
-            // Add source ledger head to sources array
-            transactionData.sources = [{
-                ledger_head_id: parseInt(formData.source_ledger_head_id),
-                amount: formData.cash_type === 'multiple'
-                    ? calculateTotalAmount()
-                    : parseFloat(formData.amount)
-            }];
+            console.log('Prepared data for submission:', submitData);
 
             let response;
+
             if (isEditing) {
                 // Update existing transaction
-                response = await api.put(`/api/transactions/${formData.id}`, transactionData);
-            } else {
-                // Create new debit transaction
-                response = await api.post('/api/transactions/debit', transactionData);
-            }
-
-            if (response.data && response.data.success) {
-                // Call onSuccess callback
-                if (onSuccess) {
-                    onSuccess(response.data.data || response.data.transaction);
-                }
-
-                // Show success message
-                const successMessage = formData.cash_type === 'cheque'
-                    ? 'Pending cheque transaction created successfully'
-                    : isEditing
-                        ? 'Transaction updated successfully'
-                        : 'Debit transaction created successfully';
-
-                toast.success(successMessage, {
+                console.log(`Updating transaction ${dataToSubmit.id}...`);
+                response = await api.put(`${API_CONFIG.API_PREFIX}/transactions/${dataToSubmit.id}`, submitData);
+                console.log('Update response:', response.data);
+                toast.success('Transaction updated successfully', {
                     position: "top-right",
                     autoClose: 3000
                 });
             } else {
-                setError(response.data?.message || 'Failed to process transaction');
+                // Create new transaction
+                console.log('Creating new transaction...');
+                response = await api.post(`${API_CONFIG.API_PREFIX}/transactions/debit`, submitData);
+                console.log('Creation response:', response.data);
+                toast.success('Transaction created successfully', {
+                    position: "top-right",
+                    autoClose: 3000
+                });
+            }
+
+            // Check for successful response
+            if (response.data && response.data.success) {
+                // Refresh the monthly snapshots if function exists
+                try {
+                    console.log('Refreshing monthly snapshots view...');
+                    refreshMonthlySnapshots();
+                } catch (refreshError) {
+                    console.error('Error refreshing monthly snapshots:', refreshError);
+                    // Non-critical error, don't show to user
+                }
+                
+                if (onSuccess) {
+                    onSuccess(response.data.transaction || response.data.data);
+                }
+            } else {
+                console.warn('Unexpected API response format:', response.data);
+                setError('Unexpected response from server');
             }
         } catch (err) {
-            console.error(`Error ${isEditing ? 'updating' : 'creating'} transaction:`, err);
+            console.error('Error submitting transaction:', err);
 
-            if (err.response && err.response.data) {
-                setError(err.response.data.message || `Error: ${err.response.status}`);
-            } else {
-                setError(`Failed to ${isEditing ? 'update' : 'create'} transaction: ${err.message}`);
+            let errorMessage = 'Failed to save transaction';
+            
+            if (err.response) {
+                console.error('Response data:', err.response.data);
+                errorMessage = err.response.data?.message || `Server error: ${err.response.status}`;
+            } else if (err.request) {
+                errorMessage = 'No response from server. Please check your connection.';
             }
 
-            // Show error toast
-            toast.error(`Error: ${err.response?.data?.message || err.message}`, {
+            setError(errorMessage);
+            toast.error(errorMessage, {
                 position: "top-right",
                 autoClose: 5000
             });

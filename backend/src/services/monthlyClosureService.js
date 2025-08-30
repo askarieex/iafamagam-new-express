@@ -1,6 +1,5 @@
-const { Op } = require('sequelize');
 const db = require('../models');
-const { sequelize } = db;
+const { Sequelize, sequelize, Op } = require('../models');
 const BalanceCalculator = require('../utils/balanceCalculator');
 
 /**

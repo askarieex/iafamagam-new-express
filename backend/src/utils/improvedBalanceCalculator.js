@@ -1,7 +1,9 @@
 const db = require('../models');
+const { sequelize } = db;
+const { Op } = require('sequelize');
 
 /**
- * Utility class for balance calculation and recalculation
+ * Improved calculator with better balance propagation
  */
 class ImprovedBalanceCalculator {
     /**
@@ -66,14 +68,18 @@ class ImprovedBalanceCalculator {
                     const prevMonth = startMonth === 1 ? 12 : startMonth - 1;
                     const prevYear = startMonth === 1 ? startYear - 1 : startYear;
                     
-                    // Look for previous month's closing balance
+                    // FIXED: Only look at earlier periods, never future ones
+                    // This is the key fix to prevent backwards flow
                     const prevSnapshot = await db.MonthlyLedgerBalance.findOne({
                         where: {
                             account_id: accountId,
                             ledger_head_id: ledgerHeadId,
-                            month: prevMonth,
-                            year: prevYear
+                            [Op.or]: [
+                                { year: { [Op.lt]: currentYear } },             // Earlier years
+                                { year: currentYear, month: { [Op.lt]: currentMonth } } // Earlier months same year
+                            ]
                         },
+                        order: [['year', 'DESC'], ['month', 'DESC']],           // Most recent earlier month
                         transaction
                     });
                     
