@@ -2,143 +2,165 @@ const transactionService = require('../services/transactionService');
 const snapshotService = require('../services/snapshotService');
 const db = require('../models');
 const monthlyClosureService = require('../services/monthlyClosureService');
+const periodService = require('../services/periodManagementService');
+const balanceCalculationService = require('../services/balanceCalculationService');
 
 /**
- * Validates if a transaction date is in a closed period or if it's outside the open period
- * @param {*} account The account object
- * @param {*} txDate Transaction date string (YYYY-MM-DD)
- * @param {*} adminOverride Whether admin override is specified
+ * Validates if a transaction date is within an open accounting period
+ * Uses the centralized PeriodManagementService for consistent period validation
+ * @param {Object} account The account object
+ * @param {string} txDate Transaction date string (YYYY-MM-DD)
+ * @param {boolean} adminOverride Whether admin override is specified
+ * @returns {Promise<Object>} Validation result { allowed, message?, requiresRecalculation?, warning? }
  */
 const validateTransactionPeriod = async (account, txDate, adminOverride = false) => {
-    // If no last closed date, check if there's an open period
-    if (!account.last_closed_date) {
-        // Even without a last_closed_date, we need to check for open period
-        const openPeriod = await monthlyClosureService.getOpenPeriodForAccount(account.id);
-
-        if (!openPeriod) {
-            // No open period exists yet, check if it's current month
-            const txDateObj = new Date(txDate);
-            const currentDate = new Date();
-            const currentMonth = currentDate.getMonth() + 1;
-            const currentYear = currentDate.getFullYear();
-
-            // If it's current month, auto-open it and allow the transaction
-            if (txDateObj.getMonth() === currentDate.getMonth() &&
-                txDateObj.getFullYear() === currentDate.getFullYear()) {
-
-                try {
-                    // Auto-open the current month since we're allowing transactions in it
-                    await monthlyClosureService.openAccountingPeriod(
-                        currentMonth,
-                        currentYear,
-                        account.id
-                    );
-                    console.log(`Auto-opened period ${currentMonth}/${currentYear} for account ${account.id}`);
-                } catch (error) {
-                    console.error('Failed to auto-open period:', error);
-                    // Continue allowing the transaction even if auto-open fails
-                }
-
-                return { allowed: true };
+    try {
+        // First check: Prevent future transactions (dates beyond current date/time)
+        const txDateObj = new Date(txDate);
+        const currentDate = new Date();
+        
+        // Set time to end of day for current date to allow transactions on current date
+        const todayEndOfDay = new Date(currentDate);
+        todayEndOfDay.setHours(23, 59, 59, 999);
+        
+        if (txDateObj > todayEndOfDay) {
+            const message = `Future transactions are not allowed. Transaction date ${txDate} is beyond current date ${currentDate.toDateString()}.`;
+            
+            if (adminOverride) {
+                return { 
+                    allowed: true, 
+                    requiresRecalculation: true, 
+                    warning: `${message} - Admin override applied.` 
+                };
             }
-
-            // For past or future months, require opening the period first
+            
             return {
                 allowed: false,
-                message: `No open accounting period exists. Please open a period first before entering transactions.`
+                message
             };
         }
 
-        // Check if transaction is within the open period
-        const txDateObj = new Date(txDate);
-        const txMonth = txDateObj.getMonth() + 1; // Convert from 0-based to 1-based
+        // Second check: Prevent transactions that are too old (more than one month back)
+        const currentMonth = currentDate.getMonth(); // 0-11
+        const currentYear = currentDate.getFullYear();
+        const txMonth = txDateObj.getMonth(); // 0-11
         const txYear = txDateObj.getFullYear();
+        
+        // Calculate the earliest allowed month (one month back from current)
+        let earliestMonth = currentMonth - 1;
+        let earliestYear = currentYear;
+        
+        if (earliestMonth < 0) {
+            earliestMonth = 11; // December of previous year
+            earliestYear = currentYear - 1;
+        }
+        
+        // Check if transaction date is older than the earliest allowed month
+        const isOlderThanAllowed = (txYear < earliestYear) || 
+                                  (txYear === earliestYear && txMonth < earliestMonth);
+        
+        if (isOlderThanAllowed) {
+            const monthNames = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            
+            const earliestMonthName = monthNames[earliestMonth];
+            const currentMonthName = monthNames[currentMonth];
+            const txMonthName = monthNames[txMonth];
+            
+            const message = `Transactions older than one month are not allowed. Current month is ${currentMonthName} ${currentYear}, earliest allowed month is ${earliestMonthName} ${earliestYear}, but transaction date is ${txMonthName} ${txYear}.`;
+            
+            if (adminOverride) {
+                return { 
+                    allowed: true, 
+                    requiresRecalculation: true, 
+                    warning: `${message} - Admin override applied.` 
+                };
+            }
+            
+            return {
+                allowed: false,
+                message
+            };
+        }
 
-        if (openPeriod.month === txMonth && openPeriod.year === txYear) {
+        // Third check: Verify date is within an open period using centralized service
+        const isDateValid = await periodService.isDateInOpenPeriod(account.id, txDate);
+        
+        if (isDateValid) {
             return { allowed: true };
         }
 
-        if (adminOverride) {
-            return { allowed: true, requiresRecalculation: true, warning: 'Transaction is outside open period but allowed with admin override.' };
-        }
-
-        return {
-            allowed: false,
-            message: `Transaction date must be within the open period (${openPeriod.month}/${openPeriod.year}).`
-        };
-    }
-
-    // If there is a last_closed_date, check both closed and open periods
-    const txDateObj = new Date(txDate);
-    const lastClosedDateObj = new Date(account.last_closed_date);
-
-    // Set both dates to start of day for accurate comparison
-    txDateObj.setHours(0, 0, 0, 0);
-    lastClosedDateObj.setHours(0, 0, 0, 0);
-
-    // Check if transaction is in or before a closed period
-    if (txDateObj <= lastClosedDateObj) {
-        if (adminOverride) {
-            return { allowed: true, requiresRecalculation: true, warning: 'Transaction date is in a closed period but allowed with admin override.' };
-        }
-        return {
-            allowed: false,
-            message: `Cannot enter transactions on or before the last closed date (${account.last_closed_date}). The period is closed.`
-        };
-    }
-
-    // Get the open period
-    const openPeriod = await monthlyClosureService.getOpenPeriodForAccount(account.id);
-    if (!openPeriod) {
-        // This should generally not happen if last_closed_date is set
-        // Check if it's current month
-        const txDateObj = new Date(txDate);
-        const currentDate = new Date();
-        const currentMonth = currentDate.getMonth() + 1;
-        const currentYear = currentDate.getFullYear();
-
-        // If it's current month, auto-open it and allow the transaction
+        // Date is not in an open period, check if we should auto-open
+        
+        // If it's current month and no period is open, try auto-opening
         if (txDateObj.getMonth() === currentDate.getMonth() &&
             txDateObj.getFullYear() === currentDate.getFullYear()) {
-
+            
             try {
-                // Auto-open the current month since we're allowing transactions in it
-                await monthlyClosureService.openAccountingPeriod(
-                    currentMonth,
-                    currentYear,
-                    account.id
-                );
-                console.log(`Auto-opened period ${currentMonth}/${currentYear} for account ${account.id}`);
-
-                // Return the newly created period
-                return { allowed: true };
+                const result = await periodService.autoEnsureCurrentPeriodOpen(account.id);
+                if (result.success) {
+                    console.log(`Auto-opened period for account ${account.id}: ${result.message}`);
+                    return { allowed: true };
+                }
             } catch (error) {
                 console.error('Failed to auto-open period:', error);
             }
         }
 
+        // Check what period is currently open to provide better error message
+        const openPeriod = await periodService.getCurrentOpenPeriod(account.id);
+        
+        if (openPeriod) {
+            const message = `Selected date is not within the open accounting period. Currently open: ${openPeriod.getDisplayName()}`;
+            
+            if (adminOverride) {
+                return { 
+                    allowed: true, 
+                    requiresRecalculation: true, 
+                    warning: `${message} - Admin override applied.` 
+                };
+            }
+            
+            return {
+                allowed: false,
+                message
+            };
+        } else {
+            // No period is open at all
+            const message = `No open accounting period exists. Please open a period first before entering transactions.`;
+            
+            if (adminOverride) {
+                return { 
+                    allowed: true, 
+                    requiresRecalculation: true, 
+                    warning: `${message} - Admin override applied.` 
+                };
+            }
+            
+            return {
+                allowed: false,
+                message
+            };
+        }
+
+    } catch (error) {
+        console.error('Error validating transaction period:', error);
+        
+        if (adminOverride) {
+            return { 
+                allowed: true, 
+                requiresRecalculation: true, 
+                warning: 'Period validation failed but admin override applied.' 
+            };
+        }
+        
         return {
             allowed: false,
-            message: `No open accounting period exists. Please open a period first before entering transactions.`
+            message: 'Failed to validate transaction date against accounting periods. Please try again.'
         };
     }
-
-    // Check if transaction is within the open period
-    const txMonth = txDateObj.getMonth() + 1; // Convert from 0-based to 1-based
-    const txYear = txDateObj.getFullYear();
-
-    if (openPeriod.month === txMonth && openPeriod.year === txYear) {
-        return { allowed: true };
-    }
-
-    if (adminOverride) {
-        return { allowed: true, requiresRecalculation: true, warning: 'Transaction is outside open period but allowed with admin override.' };
-    }
-
-    return {
-        allowed: false,
-        message: `Transaction date must be within the open period (${openPeriod.month}/${openPeriod.year}).`
-    };
 };
 
 /**
@@ -203,18 +225,32 @@ class TransactionController {
             const today = new Date();
             const isBackdated = txDateObj < today;
 
-            // Recalculate monthly snapshots if the transaction is backdated or requires recalculation
+            // Trigger cascading balance updates if the transaction is backdated or requires recalculation
             if (isBackdated || periodCheck.requiresRecalculation) {
                 try {
-                    await monthlyClosureService.recalculateMonthlySnapshots(
+                    // Use the new cascading balance update system
+                    await balanceCalculationService.triggerCascadingUpdate(
                         creditData.account_id,
                         creditData.ledger_head_id,
-                        creditData.tx_date
+                        creditData.tx_date,
+                        t
                     );
+                    
+                    // Also handle split transactions if they exist
+                    if (creditData.splits && creditData.splits.length > 0) {
+                        for (const split of creditData.splits) {
+                            await balanceCalculationService.triggerCascadingUpdate(
+                                creditData.account_id,
+                                split.ledger_head_id,
+                                creditData.tx_date,
+                                t
+                            );
+                        }
+                    }
 
-                    console.log(`Recalculated monthly snapshots after backdated credit transaction: ${creditData.tx_date}`);
+                    console.log(`🔄 Triggered cascading balance updates after backdated credit transaction: ${creditData.tx_date}`);
                 } catch (recalcError) {
-                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    console.error('Failed to trigger cascading balance updates:', recalcError);
                 }
             }
 
@@ -294,28 +330,30 @@ class TransactionController {
             const today = new Date();
             const isBackdated = txDateObj < today;
 
-            // Recalculate monthly snapshots if the transaction is backdated or requires recalculation
+            // Trigger cascading balance updates if the transaction is backdated or requires recalculation
             if (isBackdated || periodCheck.requiresRecalculation) {
                 try {
-                    // Recalculate for the target ledger head
-                    await monthlyClosureService.recalculateMonthlySnapshots(
+                    // Trigger cascading update for the target ledger head
+                    await balanceCalculationService.triggerCascadingUpdate(
                         debitData.account_id,
                         debitData.ledger_head_id,
-                        debitData.tx_date
+                        debitData.tx_date,
+                        t
                     );
 
-                    // Also recalculate for each source ledger head
+                    // Also trigger for each source ledger head
                     for (const source of debitData.sources) {
-                        await monthlyClosureService.recalculateMonthlySnapshots(
+                        await balanceCalculationService.triggerCascadingUpdate(
                             debitData.account_id,
                             source.ledger_head_id,
-                            debitData.tx_date
+                            debitData.tx_date,
+                            t
                         );
                     }
 
-                    console.log(`Recalculated monthly snapshots after backdated debit transaction: ${debitData.tx_date}`);
+                    console.log(`🔄 Triggered cascading balance updates after backdated debit transaction: ${debitData.tx_date}`);
                 } catch (recalcError) {
-                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    console.error('Failed to trigger cascading balance updates:', recalcError);
                 }
             }
 
@@ -485,25 +523,31 @@ class TransactionController {
 
             const result = await transactionService.voidTransaction(id);
 
-            // If this was an admin override for a closed period, recalculate the monthly snapshots
+            // If this was an admin override for a closed period, trigger cascading balance updates
             if (req.body.admin_override && account.last_closed_date &&
                 new Date(txDate) <= new Date(account.last_closed_date)) {
                 try {
-                    // Import the service here to avoid circular dependencies
-                    const monthlyClosureService = require('../services/monthlyClosureService');
-
-                    // Recalculate snapshots for all affected ledger heads
-                    for (const ledgerId of affectedLedgerHeadIds) {
-                        await monthlyClosureService.recalculateMonthlySnapshots(
-                            accountId,
-                            ledgerId,
-                            txDate
-                        );
+                    // Trigger cascading updates for all affected ledger heads
+                    // Create a new database transaction for the cascading updates
+                    const cascadeTransaction = await db.sequelize.transaction();
+                    try {
+                        for (const ledgerId of affectedLedgerHeadIds) {
+                            await balanceCalculationService.triggerCascadingUpdate(
+                                accountId,
+                                ledgerId,
+                                txDate,
+                                cascadeTransaction
+                            );
+                        }
+                        await cascadeTransaction.commit();
+                    } catch (cascadeError) {
+                        await cascadeTransaction.rollback();
+                        throw cascadeError;
                     }
 
-                    console.log(`Recalculated monthly snapshots after voiding transaction in closed period: ${txDate}`);
+                    console.log(`🔄 Triggered cascading balance updates after voiding transaction in closed period: ${txDate}`);
                 } catch (recalcError) {
-                    console.error('Failed to recalculate monthly snapshots:', recalcError);
+                    console.error('Failed to trigger cascading balance updates:', recalcError);
                     // Don't fail the request, just log the error
                 }
             }

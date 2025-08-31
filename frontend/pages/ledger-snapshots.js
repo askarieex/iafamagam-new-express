@@ -4,14 +4,10 @@ import { toast } from 'react-toastify';
 import {
     FaChartLine,
     FaCalendarAlt,
-    FaTable,
-    FaSearch,
     FaDownload,
-    FaExclamationCircle,
     FaLock,
     FaUnlock,
     FaRegMoneyBillAlt,
-    FaRegFileAlt,
     FaPrint,
     FaChevronDown,
     FaChevronRight,
@@ -24,22 +20,24 @@ import {
     FaPlus,
     FaMinus,
     FaAngleRight,
-    FaAngleDown
+    FaAngleDown,
+    FaBuilding,
+    FaUsers,
+    FaTags,
+    FaExclamationCircle
 } from 'react-icons/fa';
 import API_CONFIG from '../config';
-import PeriodStatusBadge from '../components/reports/PeriodStatusBadge';
 
 export default function LedgerSnapshots() {
-    const [accounts, setAccounts] = useState([]);
-    const [selectedAccountId, setSelectedAccountId] = useState('');
+    const [allAccountsData, setAllAccountsData] = useState({});
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [monthlyData, setMonthlyData] = useState({});
     const [expandedMonths, setExpandedMonths] = useState({});
+    const [expandedAccounts, setExpandedAccounts] = useState({});
     const [periodStatuses, setPeriodStatuses] = useState({});
-    const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'open', 'closed'
-    const [yearTotals, setYearTotals] = useState({
+    const [activeFilter, setActiveFilter] = useState('all');
+    const [systemTotals, setSystemTotals] = useState({
         receipts: 0,
         payments: 0,
         balance: 0,
@@ -53,29 +51,32 @@ export default function LedgerSnapshots() {
         (_, i) => new Date().getFullYear() - 5 + i
     );
 
-    // Use effect for initial data loading
-    useEffect(() => {
-        fetchAccounts();
-    }, []);
+    const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ];
 
-    // Load account data and fetch snapshots whenever account is selected
     useEffect(() => {
-        if (selectedAccountId && selectedYear) {
-            fetchMonthlyData();
-            fetchPeriodStatuses();
-        }
-    }, [selectedAccountId, selectedYear]);
+        fetchAllAccountsData();
+    }, [selectedYear]);
 
-    // Calculate year totals when monthly data changes
     useEffect(() => {
-        calculateYearTotals();
-    }, [monthlyData]);
+        calculateSystemTotals();
+    }, [allAccountsData]);
 
     // Toggle month expansion
     const toggleMonth = (month) => {
         setExpandedMonths(prev => ({
             ...prev,
             [month]: !prev[month]
+        }));
+    };
+
+    // Toggle account expansion
+    const toggleAccount = (accountId) => {
+        setExpandedAccounts(prev => ({
+            ...prev,
+            [accountId]: !prev[accountId]
         }));
     };
 
@@ -88,147 +89,114 @@ export default function LedgerSnapshots() {
         setExpandedMonths(newExpandedState);
     };
 
-    // Fetch all accounts
-    const fetchAccounts = async () => {
+    // Fetch data for all accounts
+    const fetchAllAccountsData = async () => {
         try {
             setLoading(true);
-            const response = await axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/accounts`);
+            setError(null);
 
-            if (response.data.success) {
-                setAccounts(response.data.data);
-                // Select the first account by default if available
-                if (response.data.data.length > 0 && !selectedAccountId) {
-                    setSelectedAccountId(response.data.data[0].id);
-                }
-            } else {
-                setError(response.data.message || 'Failed to fetch accounts');
-            }
-            setLoading(false);
-        } catch (err) {
-            setLoading(false);
-            setError(err.response?.data?.message || err.message || 'An error occurred');
-            toast.error('Error loading accounts');
-        }
-    };
-
-    // Fetch period closure status
-    const fetchPeriodStatuses = async () => {
-        try {
-            // First, get the currently open period for this account
-            const openPeriodResponse = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open-period`,
-                {
-                    params: {
-                        account_id: selectedAccountId
-                    }
-                }
-            );
-
-            // Set all periods to closed by default
-            const statuses = {};
-            for (let month = 1; month <= 12; month++) {
-                statuses[month] = false; // Default all to closed
-            }
-
-            // If we have an open period, mark only that one as open
-            if (openPeriodResponse.data.success && openPeriodResponse.data.data) {
-                const openPeriod = openPeriodResponse.data.data;
-
-                // Check if the open period is in the selected year
-                if (openPeriod.year === selectedYear) {
-                    statuses[openPeriod.month] = true; // Only this period is open
-                }
-            } else {
-                // If no open period found, check if current month should be open
-                const currentDate = new Date();
-                const currentMonth = currentDate.getMonth() + 1;
-                const currentYear = currentDate.getFullYear();
-                
-                // If we're viewing the current year, mark current month as open
-                if (selectedYear === currentYear) {
-                    console.log(`No open period found, but marking current month (${currentMonth}) as open for year ${currentYear}`);
-                    statuses[currentMonth] = true;
-                }
-            }
-
-            setPeriodStatuses(statuses);
-        } catch (err) {
-            console.error('Error checking period status:', err);
-            // Default behavior: if we're viewing current year, mark current month as open
-            const statuses = {};
-            const currentDate = new Date();
-            const currentMonth = currentDate.getMonth() + 1;
-            const currentYear = currentDate.getFullYear();
+            // First get all accounts
+            const accountsResponse = await axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/accounts`);
             
-            for (let month = 1; month <= 12; month++) {
-                // Mark current month as open if viewing current year
-                statuses[month] = (selectedYear === currentYear && month === currentMonth);
+            if (!accountsResponse.data.success) {
+                throw new Error('Failed to fetch accounts');
             }
-            setPeriodStatuses(statuses);
-        }
-    };
 
-    // Fetch monthly data
-    const fetchMonthlyData = async () => {
-        setLoading(true);
-        setError(null);
+            const accounts = accountsResponse.data.data;
+            const allData = {};
 
-        try {
-            // Fetch all months for the selected year
-            const monthData = {};
-
-            for (let month = 1; month <= 12; month++) {
-                const response = await axios.get(
-                    `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-ledger-balances`,
-                    {
-                        params: {
-                            account_id: selectedAccountId,
-                            month: month,
-                            year: selectedYear
+            // Fetch data for each account
+            for (const account of accounts) {
+                console.log(`Fetching data for account: ${account.name} (ID: ${account.id})`);
+                
+                try {
+                    // Fetch monthly data for this account
+                    const monthlyResponse = await axios.get(
+                        `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-ledger-balances`,
+                        {
+                            params: {
+                                account_id: account.id,
+                                year: selectedYear
+                            }
                         }
-                    }
-                );
+                    );
 
-                if (response.data.success) {
-                    monthData[month] = {
-                        balances: response.data.data,
-                        totals: calculateMonthTotals(response.data.data)
-                    };
-                } else {
-                    monthData[month] = {
-                        balances: [],
-                        totals: { receipts: 0, payments: 0, balance: 0, cashInHand: 0, cashInBank: 0 }
+                    // Fetch period statuses for this account
+                    const periodResponse = await axios.get(
+                        `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/periods/year-status`,
+                        {
+                            params: {
+                                account_id: account.id,
+                                year: selectedYear
+                            }
+                        }
+                    );
+
+                    if (monthlyResponse.data.success) {
+                        allData[account.id] = {
+                            account: account,
+                            monthlyData: processMonthlyData(monthlyResponse.data.data || []),
+                            periodStatuses: periodResponse.data.success ? periodResponse.data.data.periods : {}
+                        };
+                    }
+                } catch (accountError) {
+                    console.error(`Error fetching data for account ${account.name}:`, accountError);
+                    // Continue with other accounts even if one fails
+                    allData[account.id] = {
+                        account: account,
+                        monthlyData: {},
+                        periodStatuses: {}
                     };
                 }
             }
 
-            setMonthlyData(monthData);
+            setAllAccountsData(allData);
+            
+            // Auto-expand accounts that have data
+            const newExpandedAccounts = {};
+            Object.keys(allData).forEach(accountId => {
+                const hasData = Object.keys(allData[accountId].monthlyData).length > 0;
+                newExpandedAccounts[accountId] = hasData;
+            });
+            setExpandedAccounts(newExpandedAccounts);
+
         } catch (err) {
+            console.error('Error fetching accounts data:', err);
             setError(err.response?.data?.message || err.message || 'An error occurred');
-            toast.error('Error loading monthly data');
+            toast.error('Error loading ledger snapshots');
         } finally {
             setLoading(false);
         }
     };
 
-    // Calculate totals for a single month
-    const calculateMonthTotals = (balances) => {
-        return balances.reduce(
-            (acc, balance) => {
-                return {
-                    receipts: acc.receipts + parseFloat(balance.receipts || 0),
-                    payments: acc.payments + parseFloat(balance.payments || 0),
-                    balance: acc.balance + parseFloat(balance.closing_balance || 0),
-                    cashInHand: acc.cashInHand + parseFloat(balance.cash_in_hand || 0),
-                    cashInBank: acc.cashInBank + parseFloat(balance.cash_in_bank || 0)
+    // Process monthly data into organized structure
+    const processMonthlyData = (rawData) => {
+        const monthData = {};
+        
+        rawData.forEach(balance => {
+            const month = balance.month;
+            if (!monthData[month]) {
+                monthData[month] = {
+                    balances: [],
+                    totals: { receipts: 0, payments: 0, balance: 0, cashInHand: 0, cashInBank: 0 }
                 };
-            },
-            { receipts: 0, payments: 0, balance: 0, cashInHand: 0, cashInBank: 0 }
-        );
+            }
+            
+            monthData[month].balances.push(balance);
+            
+            // Calculate totals
+            monthData[month].totals.receipts += parseFloat(balance.receipts || 0);
+            monthData[month].totals.payments += parseFloat(balance.payments || 0);
+            monthData[month].totals.balance += parseFloat(balance.closing_balance || 0);
+            monthData[month].totals.cashInHand += parseFloat(balance.cash_in_hand || 0);
+            monthData[month].totals.cashInBank += parseFloat(balance.cash_in_bank || 0);
+        });
+
+        return monthData;
     };
 
-    // Calculate totals for the entire year
-    const calculateYearTotals = () => {
+    // Calculate system-wide totals
+    const calculateSystemTotals = () => {
         let totals = {
             receipts: 0,
             payments: 0,
@@ -237,170 +205,126 @@ export default function LedgerSnapshots() {
             bank: 0
         };
 
-        Object.values(monthlyData).forEach(month => {
-            totals.receipts += month.totals.receipts;
-            totals.payments += month.totals.payments;
-            totals.balance = month.totals.balance; // Last month's closing balance
-            totals.cash += month.totals.cashInHand;
-            totals.bank += month.totals.cashInBank;
+        Object.values(allAccountsData).forEach(accountData => {
+            Object.values(accountData.monthlyData).forEach(month => {
+                totals.receipts += month.totals.receipts;
+                totals.payments += month.totals.payments;
+                totals.balance += month.totals.balance;
+                totals.cash += month.totals.cashInHand;
+                totals.bank += month.totals.cashInBank;
+            });
         });
 
-        setYearTotals(totals);
+        setSystemTotals(totals);
     };
+
+    // Format currency values
+    const formatCurrency = (amount) => {
+        const value = parseFloat(amount) || 0;
+        return new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(value);
+    };
+
+    // Get filtered months based on active filter
+    const getFilteredMonths = () => {
+        const allMonths = Array.from({ length: 12 }, (_, i) => i + 1);
+        
+        if (activeFilter === 'all') return allMonths;
+        
+        return allMonths.filter(month => {
+            // Check if any account has this month in the desired state
+            return Object.values(allAccountsData).some(accountData => {
+                const isOpen = accountData.periodStatuses[month];
+                return activeFilter === 'open' ? isOpen : !isOpen;
+            });
+        });
+    };
+
+    // Get month name
+    const getMonthName = (month) => months[month - 1];
 
     // Export data to CSV
     const exportToCsv = () => {
-        if (Object.values(monthlyData).length === 0) {
-            toast.warning('No data to export');
-            return;
-        }
-
-        // Group data by month
-        const monthlyData = {};
-        Object.entries(this.state.monthlyData).forEach(([month, data]) => {
-            if (!monthlyData[month]) {
-                monthlyData[month] = [];
-            }
-            monthlyData[month].push(data);
-        });
-
-        // Build CSV content
-        let csvContent = "Month,Ledger Head,Opening Balance,Receipts,Payments,Closing Balance,Cash In Hand,Cash In Bank\n";
-
-        for (let month = 1; month <= 12; month++) {
-            const snapshots = monthlyData[month] || [];
-            const monthName = getMonthName(month);
-
-            if (snapshots.length === 0) {
-                csvContent += `${monthName},No data available,,,,,\n`;
-            } else {
-                snapshots.forEach(snapshot => {
-                    csvContent += `${monthName},${snapshot.ledgerHead?.name || 'Unknown'},${snapshot.opening_balance},${snapshot.receipts},${snapshot.payments},${snapshot.closing_balance},${snapshot.cash_in_hand},${snapshot.cash_in_bank}\n`;
-                });
-            }
-        }
-
-        // Create download link
-        const selectedAccount = accounts.find(account => account.id === parseInt(selectedAccountId));
-        const accountName = selectedAccount ? selectedAccount.name : 'account';
-        const filename = `${accountName}_${selectedYear}_ledger_snapshots.csv`;
-
+        const csvContent = generateCsvContent();
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.setAttribute('href', url);
-        link.setAttribute('download', filename);
-        link.style.visibility = 'hidden';
+        link.setAttribute('download', `all_accounts_${selectedYear}_ledger_snapshots.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     };
 
-    // Format currency values
-    const formatCurrency = (amount) => {
-        const value = parseFloat(amount);
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 2
-        }).format(value);
-    };
-
-    // Get month name
-    const getMonthName = (month) => {
-        const monthNames = [
-            'January', 'February', 'March', 'April', 'May', 'June',
-            'July', 'August', 'September', 'October', 'November', 'December'
-        ];
-        return monthNames[month - 1];
-    };
-
-    // Filter months based on open/closed status
-    const getFilteredMonths = () => {
-        if (activeFilter === 'all') {
-            return Array.from({ length: 12 }, (_, i) => i + 1);
-        } else if (activeFilter === 'open') {
-            return Object.entries(periodStatuses)
-                .filter(([_, isOpen]) => isOpen)
-                .map(([month]) => parseInt(month));
-        } else {
-            return Object.entries(periodStatuses)
-                .filter(([_, isOpen]) => !isOpen)
-                .map(([month]) => parseInt(month));
-        }
+    const generateCsvContent = () => {
+        let csvContent = "Account,Month,Ledger Head,Type,Opening Balance,Receipts,Payments,Closing Balance,Cash In Hand,Cash In Bank\\n";
+        
+        Object.values(allAccountsData).forEach(accountData => {
+            const accountName = accountData.account.name;
+            Object.entries(accountData.monthlyData).forEach(([month, monthData]) => {
+                const monthName = getMonthName(parseInt(month));
+                monthData.balances.forEach(balance => {
+                    csvContent += `${accountName},${monthName},${balance.ledgerHead?.name || 'Unknown'},${balance.ledgerHead?.head_type || 'Unknown'},${balance.opening_balance},${balance.receipts},${balance.payments},${balance.closing_balance},${balance.cash_in_hand},${balance.cash_in_bank}\\n`;
+                });
+            });
+        });
+        
+        return csvContent;
     };
 
     return (
-        <div className="page-content-wrapper">
-            <div className="w-full space-y-5 animate-fadeIn">
-                {/* Page Header */}
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 dark:border-secondary-700">
-                        <div className="flex items-center gap-2 mb-3 sm:mb-0">
-                            <FaChartLine className="text-indigo-600 text-xl" />
-                            <h2 className="text-lg sm:text-xl font-semibold text-secondary-900 dark:text-white">
-                                Ledger Balance Snapshots
-                            </h2>
-                        </div>
+        <div className="p-6 bg-gray-50 min-h-screen">
+            {/* Header */}
+            <div className="mb-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900 flex items-center">
+                            <FaChartLine className="mr-3 text-indigo-600" />
+                            Ledger Balance Snapshots
+                        </h1>
+                        <p className="mt-1 text-gray-600">
+                            Comprehensive view of all account balances across periods
+                        </p>
+                    </div>
 
-                        <div className="w-full sm:w-auto flex flex-wrap gap-2">
-                            <button
-                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
-                                onClick={fetchMonthlyData}
-                                disabled={!selectedAccountId || loading}
-                            >
-                                {loading ? <FaSyncAlt className="mr-1.5 animate-spin" /> : <FaSearch className="mr-1.5" />}
-                                Generate Report
-                            </button>
+                    <div className="flex items-center space-x-3 mt-4 md:mt-0">
+                        {/* Export button */}
+                        <button
+                            onClick={exportToCsv}
+                            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                            disabled={loading}
+                        >
+                            <FaFileDownload className="mr-2" />
+                            Export CSV
+                        </button>
 
-                            <button
-                                className="flex-1 sm:flex-none px-3 py-2 text-xs bg-green-600 hover:bg-green-700 rounded-lg text-white font-medium flex items-center justify-center shadow-sm transition-all duration-150"
-                                onClick={exportToCsv}
-                                disabled={Object.values(monthlyData).length === 0}
-                            >
-                                <FaDownload className="mr-1.5 text-green-200" /> CSV
-                            </button>
-                        </div>
+                        {/* Refresh button */}
+                        <button
+                            onClick={fetchAllAccountsData}
+                            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                            disabled={loading}
+                        >
+                            <FaSyncAlt className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+                            Refresh
+                        </button>
                     </div>
                 </div>
 
-                {/* Filter Section */}
-                <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {/* Account selector */}
-                        <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
-                                <FaUniversity className="mr-1.5 text-indigo-500" /> Account
-                            </label>
-                            <div className="relative rounded-md shadow-sm">
+                {/* Year filter */}
+                <div className="mt-4">
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center">
+                            <FaCalendarAlt className="mr-2 text-gray-500" />
+                            <label className="text-sm font-medium text-gray-700 mr-3">Year:</label>
+                            <div className="relative">
                                 <select
-                                    className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-                                    value={selectedAccountId}
-                                    onChange={(e) => setSelectedAccountId(e.target.value)}
-                                >
-                                    <option value="">Select Account</option>
-                                    {accounts.map((account) => (
-                                        <option key={account.id} value={account.id}>
-                                            {account.name}
-                                        </option>
-                                    ))}
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-                                    <FaChevronDown className="h-4 w-4" />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Year selector */}
-                        <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center">
-                                <FaCalendarAlt className="mr-1.5 text-indigo-500" /> Financial Year
-                            </label>
-                            <div className="relative rounded-md shadow-sm">
-                                <select
-                                    className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
                                     value={selectedYear}
                                     onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                                    className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     {years.map(year => (
                                         <option key={year} value={year}>
@@ -415,262 +339,332 @@ export default function LedgerSnapshots() {
                         </div>
                     </div>
                 </div>
+            </div>
 
-                {/* Filter tabs */}
-                <div className="bg-white rounded-lg shadow">
-                    <div className="border-b border-gray-200">
-                        <nav className="flex space-x-4 px-4">
-                            <button
-                                className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'all'
-                                    ? 'border-indigo-500 text-indigo-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                    }`}
-                                onClick={() => setActiveFilter('all')}
-                            >
-                                <FaFilter className="mr-2" /> All Months
-                            </button>
-                            <button
-                                className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'closed'
-                                    ? 'border-indigo-500 text-indigo-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                    }`}
-                                onClick={() => setActiveFilter('closed')}
-                            >
-                                <FaLock className="mr-2" /> Closed Periods
-                            </button>
-                            <button
-                                className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'open'
-                                    ? 'border-indigo-500 text-indigo-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                    }`}
-                                onClick={() => setActiveFilter('open')}
-                            >
-                                <FaLockOpen className="mr-2" /> Open Periods
-                            </button>
-                        </nav>
-                    </div>
-
-                    {/* Toggle expand/collapse all */}
-                    <div className="flex justify-end p-2 text-sm text-gray-600">
-                        <button onClick={() => toggleAllMonths(true)} className="flex items-center mr-4">
-                            <FaPlus size={10} className="mr-1" /> Expand All
+            {/* Filter tabs */}
+            <div className="bg-white rounded-lg shadow mb-6">
+                <div className="border-b border-gray-200">
+                    <nav className="flex space-x-4 px-4">
+                        <button
+                            className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'all'
+                                ? 'border-indigo-500 text-indigo-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                }`}
+                            onClick={() => setActiveFilter('all')}
+                        >
+                            <FaFilter className="mr-2" /> All Months
                         </button>
-                        <button onClick={() => toggleAllMonths(false)} className="flex items-center">
-                            <FaMinus size={10} className="mr-1" /> Collapse All
+                        <button
+                            className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'closed'
+                                ? 'border-indigo-500 text-indigo-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                }`}
+                            onClick={() => setActiveFilter('closed')}
+                        >
+                            <FaLock className="mr-2" /> Closed Periods
                         </button>
-                    </div>
+                        <button
+                            className={`py-3 px-3 text-sm font-medium flex items-center border-b-2 ${activeFilter === 'open'
+                                ? 'border-indigo-500 text-indigo-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                }`}
+                            onClick={() => setActiveFilter('open')}
+                        >
+                            <FaLockOpen className="mr-2" /> Open Periods
+                        </button>
+                    </nav>
                 </div>
 
-                {/* Summary cards */}
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                    <div className="bg-emerald-500 text-white rounded-lg shadow p-4">
-                        <div className="text-sm opacity-80">TOTAL RECEIPTS</div>
-                        <div className="text-2xl font-bold mt-1">{formatCurrency(yearTotals.receipts)}</div>
-                        <div className="text-xs mt-2">Year {selectedYear}</div>
-                    </div>
-                    <div className="bg-red-500 text-white rounded-lg shadow p-4">
-                        <div className="text-sm opacity-80">TOTAL PAYMENTS</div>
-                        <div className="text-2xl font-bold mt-1">{formatCurrency(yearTotals.payments)}</div>
-                        <div className="text-xs mt-2">Year {selectedYear}</div>
-                    </div>
-                    <div className="bg-indigo-600 text-white rounded-lg shadow p-4">
-                        <div className="text-sm opacity-80">NET BALANCE</div>
-                        <div className="text-2xl font-bold mt-1">{formatCurrency(yearTotals.balance)}</div>
-                        <div className="text-xs mt-2">Year {selectedYear}</div>
-                    </div>
-                    <div className="bg-blue-500 text-white rounded-lg shadow p-4">
-                        <div className="text-sm opacity-80">CASH</div>
-                        <div className="text-2xl font-bold mt-1">{formatCurrency(yearTotals.cash)}</div>
-                        <div className="text-xs mt-2">Latest Balance</div>
-                    </div>
-                    <div className="bg-blue-700 text-white rounded-lg shadow p-4">
-                        <div className="text-sm opacity-80">BANK</div>
-                        <div className="text-2xl font-bold mt-1">{formatCurrency(yearTotals.bank)}</div>
-                        <div className="text-xs mt-2">Latest Balance</div>
-                    </div>
+                {/* Toggle expand/collapse all */}
+                <div className="flex justify-end p-2 text-sm text-gray-600">
+                    <button onClick={() => toggleAllMonths(true)} className="flex items-center mr-4">
+                        <FaPlus size={10} className="mr-1" /> Expand All
+                    </button>
+                    <button onClick={() => toggleAllMonths(false)} className="flex items-center">
+                        <FaMinus size={10} className="mr-1" /> Collapse All
+                    </button>
                 </div>
+            </div>
 
-                {/* Month accordions */}
-                {loading ? (
-                    <div className="bg-white rounded-lg shadow p-8 text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto"></div>
-                        <div className="mt-4 text-gray-600">Loading data...</div>
-                    </div>
-                ) : (
-                    <>
-                        {getFilteredMonths().map((month) => (
-                            <div key={month} className="bg-white rounded-lg shadow overflow-hidden border border-gray-100">
-                                <div
-                                    className="p-4 cursor-pointer flex justify-between items-center bg-gray-50 border-b border-gray-100"
-                                    onClick={() => toggleMonth(month)}
-                                >
-                                    <div className="flex items-center">
-                                        {expandedMonths[month] ? (
-                                            <FaAngleDown className="text-gray-500 mr-2" />
-                                        ) : (
-                                            <FaAngleRight className="text-gray-500 mr-2" />
-                                        )}
-                                        <span className="font-medium">{getMonthName(month)} {selectedYear}</span>
+            {/* System-wide Summary cards */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                <div className="bg-emerald-500 text-white rounded-lg shadow p-4">
+                    <div className="text-sm opacity-80">TOTAL RECEIPTS</div>
+                    <div className="text-2xl font-bold mt-1">{formatCurrency(systemTotals.receipts)}</div>
+                    <div className="text-xs mt-2">All Accounts {selectedYear}</div>
+                </div>
+                <div className="bg-red-500 text-white rounded-lg shadow p-4">
+                    <div className="text-sm opacity-80">TOTAL PAYMENTS</div>
+                    <div className="text-2xl font-bold mt-1">{formatCurrency(systemTotals.payments)}</div>
+                    <div className="text-xs mt-2">All Accounts {selectedYear}</div>
+                </div>
+                <div className="bg-indigo-600 text-white rounded-lg shadow p-4">
+                    <div className="text-sm opacity-80">NET BALANCE</div>
+                    <div className="text-2xl font-bold mt-1">{formatCurrency(systemTotals.balance)}</div>
+                    <div className="text-xs mt-2">All Accounts {selectedYear}</div>
+                </div>
+                <div className="bg-blue-500 text-white rounded-lg shadow p-4">
+                    <div className="text-sm opacity-80">TOTAL CASH</div>
+                    <div className="text-2xl font-bold mt-1">{formatCurrency(systemTotals.cash)}</div>
+                    <div className="text-xs mt-2">All Accounts Balance</div>
+                </div>
+                <div className="bg-blue-700 text-white rounded-lg shadow p-4">
+                    <div className="text-sm opacity-80">TOTAL BANK</div>
+                    <div className="text-2xl font-bold mt-1">{formatCurrency(systemTotals.bank)}</div>
+                    <div className="text-xs mt-2">All Accounts Balance</div>
+                </div>
+            </div>
 
-                                        {/* Period status badge */}
-                                        <div className="ml-3">
-                                            <PeriodStatusBadge isOpen={periodStatuses[month]} size="sm" />
-                                        </div>
-                                    </div>
-
-                                    <div className="flex space-x-4 text-sm">
-                                        <div>
-                                            <span className="text-gray-500">Receipts</span>
-                                            <span className="ml-2 text-green-600 font-medium">
-                                                {formatCurrency(monthlyData[month]?.totals.receipts || 0)}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500">Payments</span>
-                                            <span className="ml-2 text-red-600 font-medium">
-                                                {formatCurrency(monthlyData[month]?.totals.payments || 0)}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500">Balance</span>
-                                            <span className="ml-2 text-gray-900 font-medium">
-                                                {formatCurrency(monthlyData[month]?.totals.balance || 0)}
-                                            </span>
-                                        </div>
-                                    </div>
+            {/* Loading state */}
+            {loading ? (
+                <div className="bg-white rounded-lg shadow p-8 text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto"></div>
+                    <div className="mt-4 text-gray-600">Loading all accounts data...</div>
+                </div>
+            ) : (
+                <>
+                    {/* Month accordions */}
+                    {getFilteredMonths().map((month) => (
+                        <div key={month} className="bg-white rounded-lg shadow overflow-hidden border border-gray-100 mb-4">
+                            <div
+                                className="p-4 cursor-pointer flex justify-between items-center bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200"
+                                onClick={() => toggleMonth(month)}
+                            >
+                                <div className="flex items-center">
+                                    {expandedMonths[month] ? (
+                                        <FaAngleDown className="text-gray-500 mr-3" />
+                                    ) : (
+                                        <FaAngleRight className="text-gray-500 mr-3" />
+                                    )}
+                                    <span className="text-lg font-semibold text-gray-900">{getMonthName(month)} {selectedYear}</span>
                                 </div>
 
-                                {expandedMonths[month] && (
-                                    <div>
-                                        {monthlyData[month]?.balances.length > 0 ? (
-                                            <div className="side-by-side-ledger">
-                                                {/* Side by side table with credit on left, debit on right */}
-                                                <table className="w-full border-collapse border border-gray-200">
-                                                    <thead>
-                                                        <tr>
-                                                            <th className="border border-gray-200 bg-gray-50 text-left px-3 py-2 text-xs font-medium text-gray-600">Ledger Head</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">O.B</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Recep. During the Month</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">C. Total</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-left px-3 py-2 text-xs font-medium text-gray-600">Ledger Head</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Amount</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Balance</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Cash In Bank</th>
-                                                            <th className="border border-gray-200 bg-gray-50 text-right px-3 py-2 text-xs font-medium text-gray-600">Cash In Hand</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {(() => {
-                                                            const creditHeads = monthlyData[month].balances
-                                                                .filter(balance => balance.ledgerHead?.head_type === 'credit');
-
-                                                            const debitHeads = monthlyData[month].balances
-                                                                .filter(balance => balance.ledgerHead?.head_type === 'debit');
-
-                                                            const maxRows = Math.max(creditHeads.length, debitHeads.length);
-
-                                                            const rows = [];
-
-                                                            for (let i = 0; i < maxRows; i++) {
-                                                                const creditHead = creditHeads[i] || null;
-                                                                const debitHead = debitHeads[i] || null;
-
-                                                                rows.push(
-                                                                    <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                                                                        {/* Credit Head - First 4 columns */}
-                                                                        <td className="border border-gray-200 px-3 py-2 text-sm">
-                                                                            {creditHead ? creditHead.ledgerHead?.name || 'Unknown' : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {creditHead ? formatCurrency(creditHead.opening_balance) : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm text-green-600">
-                                                                            {creditHead ? formatCurrency(creditHead.receipts) : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm font-medium">
-                                                                            {creditHead ? formatCurrency(parseFloat(creditHead.opening_balance || 0) + parseFloat(creditHead.receipts || 0)) : ''}
-                                                                        </td>
-
-                                                                        {/* Debit Head - Next 2 columns */}
-                                                                        <td className="border border-gray-200 px-3 py-2 text-sm">
-                                                                            {debitHead ? debitHead.ledgerHead?.name || 'Unknown' : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm text-red-600 font-medium">
-                                                                            {debitHead ? formatCurrency(parseFloat(debitHead.receipts || 0)) : ''}
-                                                                        </td>
-
-                                                                        {/* Credit Head - Last 3 columns */}
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm font-medium">
-                                                                            {creditHead ? formatCurrency(creditHead.closing_balance || 0) : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {creditHead ? formatCurrency(creditHead.cash_in_bank || 0) : ''}
-                                                                        </td>
-                                                                        <td className="border border-gray-200 px-3 py-2 text-right text-sm">
-                                                                            {creditHead ? formatCurrency(creditHead.cash_in_hand || 0) : ''}
-                                                                        </td>
-                                                                    </tr>
-                                                                );
-                                                            }
-
-                                                                                                        // Add totals row
-                                            const creditTotal = creditHeads.reduce((sum, head) => sum + (parseFloat(head.opening_balance || 0) + parseFloat(head.receipts || 0)), 0);
-                                            const debitTotal = debitHeads.reduce((sum, head) => sum + parseFloat(head.receipts || 0), 0);
-
-                                                            rows.push(
-                                                                <tr key="totals" className="font-bold bg-gray-100">
-                                                                    {/* Credit totals - First 4 columns */}
-                                                                    <td className="border border-gray-200 px-3 py-2">Total (T1)</td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
-                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.opening_balance || 0), 0))}
-                                                                    </td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right text-green-700">
-                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.receipts || 0), 0))}
-                                                                    </td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right font-medium">
-                                                                        {formatCurrency(creditTotal)}
-                                                                    </td>
-
-                                                                    {/* Debit totals - Next 2 columns */}
-                                                                    <td className="border border-gray-200 px-3 py-2">Total</td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right text-red-700">
-                                                                        {formatCurrency(debitTotal)}
-                                                                    </td>
-
-                                                                    {/* Credit totals - Last 3 columns */}
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right font-medium">
-                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.closing_balance || 0), 0))}
-                                                                    </td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
-                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.cash_in_bank || 0), 0))}
-                                                                    </td>
-                                                                    <td className="border border-gray-200 px-3 py-2 text-right">
-                                                                        {formatCurrency(creditHeads.reduce((sum, head) => sum + parseFloat(head.cash_in_hand || 0), 0))}
-                                                                    </td>
-                                                                </tr>
-                                                            );
-
-                                                            return rows;
-                                                        })()}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        ) : (
-                                            <div className="p-6 text-center text-gray-500">
-                                                <FaRegFileAlt className="mx-auto mb-2 text-2xl opacity-30" />
-                                                <p>No data available for {getMonthName(month)} {selectedYear}</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                <div className="flex space-x-6 text-sm">
+                                    {/* Calculate month totals across all accounts */}
+                                    {(() => {
+                                        let monthTotals = { receipts: 0, payments: 0, balance: 0 };
+                                        Object.values(allAccountsData).forEach(accountData => {
+                                            if (accountData.monthlyData[month]) {
+                                                monthTotals.receipts += accountData.monthlyData[month].totals.receipts;
+                                                monthTotals.payments += accountData.monthlyData[month].totals.payments;
+                                                monthTotals.balance += accountData.monthlyData[month].totals.balance;
+                                            }
+                                        });
+                                        return (
+                                            <>
+                                                <div>
+                                                    <span className="text-gray-500">Receipts</span>
+                                                    <span className="ml-2 text-green-600 font-medium">
+                                                        {formatCurrency(monthTotals.receipts)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Payments</span>
+                                                    <span className="ml-2 text-red-600 font-medium">
+                                                        {formatCurrency(monthTotals.payments)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Balance</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">
+                                                        {formatCurrency(monthTotals.balance)}
+                                                    </span>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
+                                </div>
                             </div>
-                        ))}
-                    </>
-                )}
-            </div>
+
+                            {expandedMonths[month] && (
+                                <div className="p-0">
+                                    {/* Accounts within this month */}
+                                    {Object.values(allAccountsData).map(accountData => {
+                                        const monthData = accountData.monthlyData[month];
+                                        if (!monthData || monthData.balances.length === 0) {
+                                            return null; // Skip accounts with no data for this month
+                                        }
+
+                                        return (
+                                            <div key={accountData.account.id} className="border-b border-gray-100 last:border-b-0">
+                                                {/* Account header */}
+                                                <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center">
+                                                            <FaBuilding className="text-indigo-600 mr-2" />
+                                                            <span className="font-medium text-gray-900">{accountData.account.name}</span>
+                                                            <div className="ml-3 px-2 py-1 bg-white rounded text-xs text-gray-600">
+                                                                {monthData.balances.length} ledger heads
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div className="flex space-x-4 text-sm">
+                                                            <div>
+                                                                <span className="text-gray-500">Receipts</span>
+                                                                <span className="ml-2 text-green-600 font-medium">
+                                                                    {formatCurrency(monthData.totals.receipts)}
+                                                                </span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-gray-500">Balance</span>
+                                                                <span className="ml-2 text-gray-900 font-medium">
+                                                                    {formatCurrency(monthData.totals.balance)}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Ledger heads table for this account */}
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full border-collapse">
+                                                        <thead>
+                                                            <tr className="bg-gray-50">
+                                                                <th className="border-r border-gray-200 text-center px-3 py-2 text-xs font-semibold text-gray-700" colSpan="4">
+                                                                    CREDIT SIDE
+                                                                </th>
+                                                                <th className="border-r border-gray-200 text-center px-3 py-2 text-xs font-semibold text-gray-700" colSpan="2">
+                                                                    DEBIT SIDE  
+                                                                </th>
+                                                                <th className="text-center px-3 py-2 text-xs font-semibold text-gray-700" colSpan="3">
+                                                                    BALANCE
+                                                                </th>
+                                                            </tr>
+                                                            <tr className="bg-gray-100 text-xs">
+                                                                <th className="border-r border-gray-200 text-left px-3 py-2 font-medium text-gray-600">Ledger Head</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">O.B</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">Receipts</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">C. Total</th>
+                                                                <th className="border-r border-gray-200 text-left px-3 py-2 font-medium text-gray-600">Ledger Head</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">Amount</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">Balance</th>
+                                                                <th className="border-r border-gray-200 text-right px-3 py-2 font-medium text-gray-600">Cash Bank</th>
+                                                                <th className="text-right px-3 py-2 font-medium text-gray-600">Cash Hand</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(() => {
+                                                                const creditHeads = monthData.balances.filter(balance => balance.ledgerHead?.head_type === 'credit');
+                                                                const debitHeads = monthData.balances.filter(balance => balance.ledgerHead?.head_type === 'debit');
+                                                                const maxRows = Math.max(creditHeads.length, debitHeads.length);
+                                                                const rows = [];
+
+                                                                for (let i = 0; i < maxRows; i++) {
+                                                                    const creditHead = creditHeads[i] || null;
+                                                                    const debitHead = debitHeads[i] || null;
+
+                                                                    rows.push(
+                                                                        <tr key={i} className={i % 2 === 0 ? "bg-white hover:bg-gray-50" : "bg-gray-50 hover:bg-gray-100"}>
+                                                                            {/* Credit Head Columns */}
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-sm">
+                                                                                {creditHead ? (
+                                                                                    <div className="flex items-center">
+                                                                                        <FaTags className="text-green-500 mr-2 text-xs" />
+                                                                                        {creditHead.ledgerHead?.name || 'Unknown'}
+                                                                                    </div>
+                                                                                ) : ''}
+                                                                            </td>
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm">
+                                                                                {creditHead ? formatCurrency(creditHead.opening_balance) : ''}
+                                                                            </td>
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-green-600 font-medium">
+                                                                                {creditHead ? formatCurrency(creditHead.receipts) : ''}
+                                                                            </td>
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm font-semibold">
+                                                                                {creditHead ? formatCurrency(parseFloat(creditHead.opening_balance || 0) + parseFloat(creditHead.receipts || 0)) : ''}
+                                                                            </td>
+
+                                                                            {/* Debit Head Columns */}
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-sm">
+                                                                                {debitHead ? (
+                                                                                    <div className="flex items-center">
+                                                                                        <FaTags className="text-red-500 mr-2 text-xs" />
+                                                                                        {debitHead.ledgerHead?.name || 'Unknown'}
+                                                                                    </div>
+                                                                                ) : ''}
+                                                                            </td>
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-red-600 font-medium">
+                                                                                {debitHead ? formatCurrency(parseFloat(debitHead.receipts || 0)) : ''}
+                                                                            </td>
+
+                                                                            {/* Balance Columns */}
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm font-semibold">
+                                                                                {creditHead ? formatCurrency(creditHead.closing_balance) : ''}
+                                                                            </td>
+                                                                            <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-blue-600">
+                                                                                {creditHead ? formatCurrency(creditHead.cash_in_bank) : ''}
+                                                                            </td>
+                                                                            <td className="px-3 py-2 text-right text-sm text-green-600">
+                                                                                {creditHead ? formatCurrency(creditHead.cash_in_hand) : ''}
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                }
+
+                                                                return rows;
+                                                            })()}
+                                                        </tbody>
+
+                                                        {/* Account totals row */}
+                                                        <tfoot>
+                                                            <tr className="bg-indigo-50 border-t-2 border-indigo-200 font-semibold">
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-sm text-indigo-800">Total ({accountData.account.name})</td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-indigo-800">
+                                                                    {formatCurrency(monthData.balances.filter(b => b.ledgerHead?.head_type === 'credit').reduce((sum, b) => sum + parseFloat(b.opening_balance || 0), 0))}
+                                                                </td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-green-700 font-bold">
+                                                                    {formatCurrency(monthData.totals.receipts)}
+                                                                </td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-indigo-800 font-bold">
+                                                                    {formatCurrency(monthData.balances.filter(b => b.ledgerHead?.head_type === 'credit').reduce((sum, b) => sum + parseFloat(b.opening_balance || 0) + parseFloat(b.receipts || 0), 0))}
+                                                                </td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-sm text-indigo-800">Total</td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-red-700 font-bold">
+                                                                    {formatCurrency(monthData.totals.payments)}
+                                                                </td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-indigo-800 font-bold">
+                                                                    {formatCurrency(monthData.totals.balance)}
+                                                                </td>
+                                                                <td className="border-r border-gray-200 px-3 py-2 text-right text-sm text-blue-700 font-bold">
+                                                                    {formatCurrency(monthData.totals.cashInBank)}
+                                                                </td>
+                                                                <td className="px-3 py-2 text-right text-sm text-green-700 font-bold">
+                                                                    {formatCurrency(monthData.totals.cashInHand)}
+                                                                </td>
+                                                            </tr>
+                                                        </tfoot>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </>
+            )}
+
+            {/* Error state */}
+            {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div className="flex items-center">
+                        <FaExclamationCircle className="text-red-500 mr-2" />
+                        <span className="text-red-700">{error}</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Empty state */}
+            {!loading && Object.keys(allAccountsData).length === 0 && !error && (
+                <div className="bg-white rounded-lg shadow p-8 text-center">
+                    <FaChartLine className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No data available</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                        No ledger snapshots found for the selected year.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }
-
-// Set page title for MainLayout
-LedgerSnapshots.pageTitle = "Ledger Balance Snapshots";

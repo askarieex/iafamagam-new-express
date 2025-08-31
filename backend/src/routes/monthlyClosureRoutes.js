@@ -15,6 +15,9 @@ router.post('/open', protect, authorize('admin'), monthlyClosureController.openA
 // Get the currently open period for an account
 router.get('/open-period', protect, monthlyClosureController.getOpenPeriod);
 
+// Get all open periods across accounts (for transaction date validation)
+router.get('/open-periods', protect, monthlyClosureController.getOpenPeriods);
+
 // Force close current month for a specific account
 router.post('/force-close-current', protect, authorize('admin'), monthlyClosureController.forceCloseCurrentMonth);
 

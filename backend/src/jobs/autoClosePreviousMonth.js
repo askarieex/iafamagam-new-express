@@ -1,55 +1,77 @@
-const { Account } = require('../models');
-const monthlyClosureService = require('../services/monthlyClosureService');
+const periodService = require('../services/periodManagementService');
+const db = require('../models');
 
 /**
- * Auto-close previous month when a new month starts
+ * DISABLED: Auto-close functionality removed to respect manual period management
+ * This job now only ensures current periods are available without closing any periods
  */
 async function autoClosePreviousMonth() {
     try {
-        console.log('Running auto-close for previous month');
+        console.log('[AUTO-CLOSE] Starting period maintenance job');
+        console.log('[AUTO-CLOSE] NOTE: Auto-closing is DISABLED to respect manual period management');
+        console.log('[AUTO-CLOSE] This job will only ensure current periods are available');
 
-        // Get current date and previous month
+        // Get current date
         const now = new Date();
-        const prevMonth = now.getMonth(); // 0-11 (current month - 1)
-        const year = now.getFullYear();
+        const currentMonth = now.getMonth() + 1; // 1-12
+        const currentYear = now.getFullYear();
 
-        // Get all accounts
-        const accounts = await Account.findAll();
+        // Get all active accounts
+        const accounts = await db.Account.findAll({
+            where: { is_active: true }
+        });
 
-        // For each account, close the previous month if it's not already closed
+        let processedAccounts = 0;
+        let autoOpenedCount = 0;
+        let alreadyOpenCount = 0;
+
+        // For each account, ensure current period is available (but don't close anything)
         for (const account of accounts) {
-            const accountId = account.id;
-
-            // Check last closed date
-            const lastClosedDate = account.last_closed_date ? new Date(account.last_closed_date) : null;
-
-            // If account has no last closed date or last closed date is before previous month's end
-            if (!lastClosedDate ||
-                lastClosedDate.getMonth() < prevMonth ||
-                (lastClosedDate.getMonth() > prevMonth && lastClosedDate.getFullYear() < year)) {
-
-                console.log(`Auto-closing month ${prevMonth + 1}/${year} for account ${accountId}`);
-
-                try {
-                    // Close previous month
-                    await monthlyClosureService.closeAccountingPeriod(
-                        prevMonth + 1, // Convert to 1-12 format
-                        year,
-                        accountId
-                    );
-
-                    console.log(`Successfully auto-closed month ${prevMonth + 1}/${year} for account ${accountId}`);
-                } catch (closureError) {
-                    console.error(`Error closing month ${prevMonth + 1}/${year} for account ${accountId}:`, closureError);
+            try {
+                // Check if any period is open for this account
+                const openPeriod = await periodService.getCurrentOpenPeriod(account.id);
+                
+                if (openPeriod) {
+                    console.log(`[AUTO-CLOSE] Account ${account.id} (${account.name}) has open period: ${openPeriod.month}/${openPeriod.year}`);
+                    alreadyOpenCount++;
+                } else {
+                    // No period is open - auto-open current period only if it's the current month
+                    console.log(`[AUTO-CLOSE] Account ${account.id} (${account.name}) has no open period - auto-opening current month`);
+                    
+                    const result = await periodService.autoEnsureCurrentPeriodOpen(account.id);
+                    
+                    if (result.success && result.autoOpened) {
+                        console.log(`[AUTO-CLOSE] Auto-opened current period for account ${account.id}`);
+                        autoOpenedCount++;
+                    } else {
+                        console.log(`[AUTO-CLOSE] Current period already available for account ${account.id}`);
+                        alreadyOpenCount++;
+                    }
                 }
-            } else {
-                console.log(`Month ${prevMonth + 1}/${year} already closed for account ${accountId}`);
+
+                processedAccounts++;
+            } catch (error) {
+                console.error(`[AUTO-CLOSE] Error processing account ${account.id}:`, error);
             }
         }
 
-        console.log('Auto-close process completed');
+        console.log('[AUTO-CLOSE] Period maintenance completed');
+        console.log(`[AUTO-CLOSE] Accounts processed: ${processedAccounts}`);
+        console.log(`[AUTO-CLOSE] Periods auto-opened: ${autoOpenedCount}`);
+        console.log(`[AUTO-CLOSE] Periods already available: ${alreadyOpenCount}`);
+        console.log('[AUTO-CLOSE] Remember: Manual period closing is required for proper accounting control');
+
+        return {
+            success: true,
+            results: {
+                accountsProcessed: processedAccounts,
+                autoOpenedCount,
+                alreadyOpenCount
+            }
+        };
     } catch (error) {
-        console.error('Error in autoClosePreviousMonth job:', error);
+        console.error('[AUTO-CLOSE] Error in period maintenance job:', error);
+        throw error;
     }
 }
 

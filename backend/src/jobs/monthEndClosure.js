@@ -1,8 +1,9 @@
-const monthlyClosureService = require('../services/monthlyClosureService');
+const periodService = require('../services/periodManagementService');
+const db = require('../models');
 
 /**
- * This job is intended to be run on the last day of each month
- * It will automatically close the accounting period for all accounts
+ * This job respects manual period management and only auto-opens periods
+ * It will NOT automatically close periods as this interferes with manual management
  * 
  * Can be executed manually or scheduled via node-cron
  */
@@ -10,26 +11,66 @@ async function runMonthEndClosure() {
     try {
         // Get current date
         const now = new Date();
+        const currentMonth = now.getMonth() + 1; // 1-12
+        const currentYear = now.getFullYear();
 
-        // Get the month that's ending (current month)
-        const monthToClose = now.getMonth() + 1; // 1-12
-        const yearToClose = now.getFullYear();
+        console.log(`[MONTH-END-CLOSURE] Starting period maintenance for ${currentMonth}/${currentYear}`);
+        console.log(`[MONTH-END-CLOSURE] Note: This job respects manual period management and will NOT auto-close periods`);
 
-        console.log(`[MONTH-END-CLOSURE] Starting month-end closure for ${monthToClose}/${yearToClose}`);
+        // Get all active accounts
+        const accounts = await db.Account.findAll({
+            where: { is_active: true }
+        });
 
-        // Call the closeAccountingPeriod service (for all accounts)
-        const result = await monthlyClosureService.closeAccountingPeriod(monthToClose, yearToClose);
+        let processedAccounts = 0;
+        let autoOpenedCount = 0;
+        let alreadyOpenCount = 0;
 
-        console.log(`[MONTH-END-CLOSURE] Month-end closure completed successfully`);
-        console.log(`[MONTH-END-CLOSURE] Accounts processed: ${result.results.accountsProcessed}`);
-        console.log(`[MONTH-END-CLOSURE] Ledger heads processed: ${result.results.ledgerHeadsProcessed}`);
-        console.log(`[MONTH-END-CLOSURE] Snapshots created: ${result.results.snapshotsCreated}`);
-        console.log(`[MONTH-END-CLOSURE] Snapshots updated: ${result.results.snapshotsUpdated}`);
-        console.log(`[MONTH-END-CLOSURE] Next month prepared: ${result.results.nextMonthPrepared}`);
+        // For each account, ensure current period is available (but don't force close anything)
+        for (const account of accounts) {
+            try {
+                // Check if any period is open for this account
+                const openPeriod = await periodService.getCurrentOpenPeriod(account.id);
+                
+                if (openPeriod) {
+                    console.log(`[MONTH-END-CLOSURE] Account ${account.id} (${account.name}) has open period: ${openPeriod.month}/${openPeriod.year}`);
+                    alreadyOpenCount++;
+                } else {
+                    // No period is open - auto-open current period
+                    console.log(`[MONTH-END-CLOSURE] Account ${account.id} (${account.name}) has no open period - auto-opening current month`);
+                    
+                    const result = await periodService.autoEnsureCurrentPeriodOpen(account.id);
+                    
+                    if (result.success && result.autoOpened) {
+                        console.log(`[MONTH-END-CLOSURE] Auto-opened period for account ${account.id}`);
+                        autoOpenedCount++;
+                    } else {
+                        console.log(`[MONTH-END-CLOSURE] Period already available for account ${account.id}`);
+                        alreadyOpenCount++;
+                    }
+                }
 
-        return result;
+                processedAccounts++;
+            } catch (error) {
+                console.error(`[MONTH-END-CLOSURE] Error processing account ${account.id}:`, error);
+            }
+        }
+
+        console.log(`[MONTH-END-CLOSURE] Period maintenance completed successfully`);
+        console.log(`[MONTH-END-CLOSURE] Accounts processed: ${processedAccounts}`);
+        console.log(`[MONTH-END-CLOSURE] Periods auto-opened: ${autoOpenedCount}`);
+        console.log(`[MONTH-END-CLOSURE] Periods already open: ${alreadyOpenCount}`);
+
+        return {
+            success: true,
+            results: {
+                accountsProcessed: processedAccounts,
+                autoOpenedCount,
+                alreadyOpenCount
+            }
+        };
     } catch (error) {
-        console.error('[MONTH-END-CLOSURE] Error running month-end closure:', error);
+        console.error('[MONTH-END-CLOSURE] Error running period maintenance:', error);
         throw error;
     }
 }

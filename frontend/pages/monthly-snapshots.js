@@ -138,7 +138,7 @@ export default function MonthlySnapshots() {
         try {
             // First try to get the open period directly
             const openPeriodResponse = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/monthly-closure/open-period`,
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/periods/current-open`,
                 {
                     params: {
                         account_id: selectedAccountId
@@ -157,32 +157,21 @@ export default function MonthlySnapshots() {
                 const openPeriod = openPeriodResponse.data.data;
                 if (openPeriod.year === selectedYear) {
                     statuses[openPeriod.month] = true;
+                    console.log(`Found open period: ${openPeriod.month}/${openPeriod.year}`);
                 }
             } else {
-                // If no open period found, check if current month should be open
-                const currentDate = new Date();
-                const currentMonth = currentDate.getMonth() + 1;
-                const currentYear = currentDate.getFullYear();
-                
-                // If we're viewing the current year, mark current month as open
-                if (selectedYear === currentYear) {
-                    console.log(`No open period found, but marking current month (${currentMonth}) as open for year ${currentYear}`);
-                    statuses[currentMonth] = true;
-                }
+                console.log(`No open period found for account ${selectedAccountId}`);
+                // Don't show any month as open if no actual open period exists
+                // This removes the misleading fallback behavior
             }
 
             setPeriodStatuses(statuses);
         } catch (err) {
             console.error('Error checking period status:', err);
-            // Default behavior: if we're viewing current year, mark current month as open
+            // If API call fails, don't show any period as open to avoid misleading the user
             const statuses = {};
-            const currentDate = new Date();
-            const currentMonth = currentDate.getMonth() + 1;
-            const currentYear = currentDate.getFullYear();
-            
             for (let month = 1; month <= 12; month++) {
-                // Mark current month as open if viewing current year
-                statuses[month] = (selectedYear === currentYear && month === currentMonth);
+                statuses[month] = false;
             }
             setPeriodStatuses(statuses);
         }

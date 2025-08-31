@@ -772,11 +772,38 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                 cash_type: dataToSubmit.cash_type,
                 tx_date: dataToSubmit.tx_date,
                 description: dataToSubmit.description,
-                cheque_number: dataToSubmit.cheque_number || null,
-                cheque_date: dataToSubmit.cheque_date || null
+                voucher_number: dataToSubmit.voucher_number,
+                manual_voucher: dataToSubmit.manual_voucher
             };
 
-            // Add splits if present
+            // Add cash and bank amounts for multiple payment type
+            if (dataToSubmit.cash_type === 'multiple') {
+                submitData.cash_amount = parseFloat(dataToSubmit.cash_amount || 0);
+                submitData.bank_amount = parseFloat(dataToSubmit.bank_amount || 0);
+            }
+
+            // Add cheque fields if it's a cheque transaction
+            if (dataToSubmit.cash_type === 'cheque') {
+                submitData.is_cheque = true;
+                submitData.cheque_number = dataToSubmit.cheque_number;
+                submitData.bank_name = dataToSubmit.bank_name;
+                submitData.issue_date = dataToSubmit.issue_date;
+                submitData.due_date = dataToSubmit.due_date;
+            }
+
+            // Add admin override if present
+            if (adminOverride) {
+                submitData.admin_override = true;
+            }
+
+            // CRITICAL: Backend expects 'sources' array, not 'source_ledger_head_id'
+            // Create sources array with the selected source ledger head
+            submitData.sources = [{
+                ledger_head_id: parseInt(dataToSubmit.source_ledger_head_id),
+                amount: parseFloat(dataToSubmit.amount)
+            }];
+
+            // Add splits if present (additional sources)
             if (dataToSubmit.splits && dataToSubmit.splits.length > 0) {
                 submitData.splits = dataToSubmit.splits.map(split => ({
                     ledger_head_id: parseInt(split.ledger_head_id),

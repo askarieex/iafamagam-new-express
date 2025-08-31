@@ -1,5 +1,6 @@
 import '../styles/globals.css';
 import '../styles/sidebar.css';
+import '../styles/transaction-form.css';
 import MainLayout from '../layouts/MainLayout';
 import AuthLayout from '../layouts/AuthLayout';
 import dynamic from 'next/dynamic';

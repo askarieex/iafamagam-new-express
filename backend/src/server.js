@@ -23,10 +23,13 @@ const reconciliationRoutes = require('./routes/reconciliationRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const periodManagementRoutes = require('./routes/periodManagementRoutes');
+const globalPeriodRoutes = require('./routes/globalPeriodRoutes');
 
 // Import Sequelize models
 const db = require('./models');
 const monthlyClosureService = require('./services/monthlyClosureService');
+const globalPeriodService = require('./services/globalPeriodService');
 const { protect, authorize } = require('./middleware/authMiddleware');
 
 const cors = require('cors');
@@ -71,6 +74,8 @@ app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
 app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
 app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
+app.use('/api/periods', protect, periodManagementRoutes);
+app.use('/api/global-periods', protect, globalPeriodRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -91,26 +96,30 @@ app.use((req, res) => {
 });
 
 // Schedule all jobs
+// IMPORTANT: These jobs have been updated to respect manual period management
+// They will NOT automatically close periods - only ensure current periods are available
 
-// Run month-end closure every night at 11:30 PM
+// Run period maintenance every night at 11:30 PM
+// This job ensures current periods are open but DOES NOT auto-close periods
 cron.schedule('30 23 * * *', async () => {
-    console.log('Running scheduled month-end closure job');
+    console.log('Running scheduled period maintenance job');
     try {
         await monthEndClosure();
-        console.log('Month-end closure job completed successfully');
+        console.log('Period maintenance job completed successfully');
     } catch (error) {
-        console.error('Month-end closure job failed:', error);
+        console.error('Period maintenance job failed:', error);
     }
 });
 
-// Run auto-close previous month job at 1 AM on the 1st day of each month
+// Run period availability check at 1 AM on the 1st day of each month  
+// This job ensures current periods are available but DOES NOT auto-close previous periods
 cron.schedule('0 1 1 * *', async () => {
-    console.log('Running scheduled auto-close previous month job');
+    console.log('Running scheduled period availability check');
     try {
         await autoClosePreviousMonth();
-        console.log('Auto-close previous month job completed successfully');
+        console.log('Period availability check completed successfully');
     } catch (error) {
-        console.error('Auto-close previous month job failed:', error);
+        console.error('Period availability check failed:', error);
     }
 });
 
@@ -132,20 +141,19 @@ const runSystemStartupTasks = async () => {
     try {
         console.log('Running system startup tasks...');
 
-        // 1. Auto-open current month for all accounts (removed is_active filter)
-        const accounts = await db.Account.findAll();
-
-        console.log(`Checking ${accounts.length} accounts for open periods...`);
-
-        for (const account of accounts) {
-            try {
-                const result = await monthlyClosureController.ensureCurrentPeriodOpen(account.id);
-                if (result.success && result.autoOpened) {
-                    console.log(`Auto-opened period for account ${account.id} - ${account.name}`);
-                }
-            } catch (err) {
-                console.error(`Error auto-opening period for account ${account.id}:`, err);
+        // 1. Ensure global period is open (replaces account-specific period management)
+        console.log('Checking global period status...');
+        try {
+            const result = await globalPeriodService.autoEnsureCurrentPeriodOpen();
+            if (result.success && result.autoOpened) {
+                console.log('Auto-opened current global period');
+            } else if (result.success) {
+                console.log('Global period already open');
+            } else {
+                console.error('Failed to ensure global period is open:', result.error);
             }
+        } catch (err) {
+            console.error('Error managing global period:', err);
         }
 
         console.log('System startup tasks completed');

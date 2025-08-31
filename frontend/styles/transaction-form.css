@@ -1,0 +1,148 @@
+/* Enhanced styling for the redesigned transaction forms */
+
+.step-indicator {
+    @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 ease-in-out;
+}
+
+.step-indicator.active {
+    @apply bg-blue-500 text-white shadow-md;
+    transform: scale(1.05);
+}
+
+.step-indicator.inactive {
+    @apply bg-gray-200 text-gray-600;
+}
+
+.step-section {
+    @apply transition-all duration-300 ease-in-out;
+}
+
+.step-section.disabled {
+    @apply opacity-50 pointer-events-none;
+}
+
+.payment-method-btn {
+    @apply px-6 py-3 rounded-lg border-2 transition-all duration-200 ease-in-out flex items-center gap-2 font-medium;
+}
+
+.payment-method-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.payment-method-btn.selected {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.payment-method-btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+}
+
+.form-input {
+    @apply w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg transition-all duration-200 ease-in-out;
+    @apply focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white;
+}
+
+.form-input:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.balance-card {
+    @apply bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20;
+    @apply rounded-xl p-6 border border-blue-200 dark:border-blue-700;
+    animation: slideInDown 0.4s ease-out;
+}
+
+.balance-item {
+    @apply text-center transition-transform duration-200 ease-in-out;
+}
+
+.balance-item:hover {
+    transform: translateY(-2px);
+}
+
+.submit-btn {
+    @apply px-8 py-3 rounded-lg transition-all duration-200 ease-in-out flex items-center font-medium;
+}
+
+.submit-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.submit-btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+}
+
+/* Loading spinner animation */
+.loading-spinner {
+    animation: spin 1s linear infinite;
+}
+
+/* Slide animations */
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-slide-in-up {
+    animation: slideInUp 0.3s ease-out;
+}
+
+/* Form section animations */
+.form-section {
+    animation: slideInUp 0.3s ease-out;
+}
+
+/* Error message styling */
+.error-message {
+    @apply text-sm text-red-600 mt-2 animate-pulse;
+}
+
+/* Step progress line */
+.step-connector {
+    @apply absolute left-4 top-8 w-0.5 h-16 bg-gray-300 dark:bg-gray-600;
+    transform: translateX(-50%);
+}
+
+.step-connector.completed {
+    @apply bg-blue-500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    .payment-method-btn {
+        @apply px-4 py-2 text-sm;
+    }
+    
+    .balance-card {
+        @apply p-4;
+    }
+    
+    .balance-item {
+        @apply mb-4;
+    }
+    
+    .form-input {
+        @apply py-2;
+    }
+}

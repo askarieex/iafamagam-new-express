@@ -78,27 +78,28 @@ class BalanceCalculator {
             whereClause = { ...whereClause, ...dateFilter };
         }
 
-        // Credits (money in)
-        const creditsSum = await db.Transaction.sum('amount', {
-            where: {
-                ...whereClause,
-                tx_type: 'credit',
-                ledger_head_id: ledgerHeadId
+        // Use transaction_items for proper balance calculation
+        const result = await sequelize.query(`
+            SELECT SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE -ti.amount END) as balance
+            FROM transaction_items ti
+            JOIN transactions t ON ti.transaction_id = t.id
+            WHERE ti.ledger_head_id = :ledgerHeadId 
+            AND t.account_id = :accountId
+            AND t.status = 'completed'
+            ${fromDate ? 'AND t.tx_date >= :fromDate' : ''}
+            ${toDate ? 'AND t.tx_date < :toDate' : ''}
+        `, {
+            replacements: {
+                ledgerHeadId,
+                accountId,
+                fromDate: fromDate?.toISOString().split('T')[0],
+                toDate: toDate?.toISOString().split('T')[0]
             },
+            type: sequelize.QueryTypes.SELECT,
             transaction
         });
 
-        // Debits (money out)
-        const debitsSum = await db.Transaction.sum('amount', {
-            where: {
-                ...whereClause,
-                tx_type: 'debit',
-                ledger_head_id: ledgerHeadId
-            },
-            transaction
-        });
-
-        return parseFloat(creditsSum || 0) - parseFloat(debitsSum || 0);
+        return parseFloat(result[0]?.balance || 0);
     }
     
     /**
@@ -122,39 +123,33 @@ class BalanceCalculator {
         const startDateStr = startDate.toISOString().split('T')[0];
         const endDateStr = endDate.toISOString().split('T')[0];
         
-        // Credits (receipts)
-        const receiptsSum = await db.Transaction.sum('amount', {
-            where: {
-                account_id: accountId,
-                ledger_head_id: ledgerHeadId,
-                tx_type: 'credit',
-                status: 'completed',
-                tx_date: {
-                    [Op.gte]: startDateStr,
-                    [Op.lte]: endDateStr
-                }
+        // Use transaction_items to calculate receipts and payments
+        const result = await sequelize.query(`
+            SELECT 
+                SUM(CASE WHEN ti.side = '+' THEN ti.amount ELSE 0 END) as receipts,
+                SUM(CASE WHEN ti.side = '-' THEN ti.amount ELSE 0 END) as payments
+            FROM transaction_items ti
+            JOIN transactions t ON ti.transaction_id = t.id
+            WHERE ti.ledger_head_id = :ledgerHeadId 
+            AND t.account_id = :accountId
+            AND t.status = 'completed'
+            AND t.tx_date >= :startDate
+            AND t.tx_date <= :endDate
+        `, {
+            replacements: {
+                ledgerHeadId,
+                accountId,
+                startDate: startDateStr,
+                endDate: endDateStr
             },
+            type: sequelize.QueryTypes.SELECT,
             transaction
         });
-        
-        // Debits (payments)
-        const paymentsSum = await db.Transaction.sum('amount', {
-            where: {
-                account_id: accountId,
-                ledger_head_id: ledgerHeadId,
-                tx_type: 'debit',
-                status: 'completed',
-                tx_date: {
-                    [Op.gte]: startDateStr,
-                    [Op.lte]: endDateStr
-                }
-            },
-            transaction
-        });
-        
+
+        const row = result[0];
         return {
-            receipts: parseFloat(receiptsSum || 0),
-            payments: parseFloat(paymentsSum || 0)
+            receipts: parseFloat(row?.receipts || 0),
+            payments: parseFloat(row?.payments || 0)
         };
     }
     

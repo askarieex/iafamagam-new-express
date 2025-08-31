@@ -706,6 +706,40 @@ exports.ensureCurrentPeriodOpen = async (accountId) => {
 };
 
 /**
+ * Get list of all open periods across accounts
+ * @route GET /api/monthly-closure/open-periods
+ */
+exports.getOpenPeriods = async (req, res) => {
+    try {
+        const openPeriods = await db.MonthlyLedgerBalance.findAll({
+            attributes: ['account_id', 'month', 'year'],
+            where: {
+                is_open: true
+            },
+            group: ['account_id', 'month', 'year'],
+            include: [{
+                model: db.Account,
+                as: 'account',
+                attributes: ['id', 'name']
+            }],
+            raw: false
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: openPeriods
+        });
+    } catch (error) {
+        console.error('Error fetching open periods:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch open periods',
+            error: error.message
+        });
+    }
+};
+
+/**
  * Manual fallback to open a period directly with raw SQL if the ORM method fails
  */
 async function manuallyOpenPeriod(accountId, month, year) {

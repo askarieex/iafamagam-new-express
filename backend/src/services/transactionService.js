@@ -1,6 +1,8 @@
 const db = require('../models');
 const sequelize = db.sequelize;
 const { Op } = require('sequelize');
+const balanceCalculationService = require('./balanceCalculationService');
+const periodService = require('./periodManagementService');
 
 /**
  * Transaction Service - handles all transaction-related operations
@@ -114,30 +116,22 @@ class TransactionService {
             // Log the operation for debugging
             console.log(`Credit transaction created with receipt: ${receiptNo}. Pages left in booklet:`, pagesLeft.length);
 
-            // Prepare ledger head update data
-            let cashBalance = 0;
-            let bankBalance = 0;
+            // Calculate proper cash/bank split using the balance calculation service
+            const amountSplit = balanceCalculationService.calculateAmountSplit(
+                data.cash_type,
+                data.amount,
+                data.cash_amount,
+                data.bank_amount
+            );
 
-            // Determine which balance to update based on cash_type
-            if (data.cash_type === 'cash') {
-                cashBalance = parseFloat(data.amount);
-            } else if (data.cash_type === 'bank') {
-                bankBalance = parseFloat(data.amount);
-            } else if (data.cash_type === 'multiple') {
-                // For 'multiple', use the separate cash and bank amounts
-                cashBalance = parseFloat(data.cash_amount || 0);
-                bankBalance = parseFloat(data.bank_amount || 0);
-
-                // Verify that the sum matches the total amount
-                if (Math.abs((cashBalance + bankBalance) - parseFloat(data.amount)) > 0.01) {
-                    throw new Error('Sum of cash and bank amounts does not match total transaction amount');
-                }
-            } else {
-                // For other payment types (upi, card, etc.), treat as bank
-                bankBalance = parseFloat(data.amount);
+            if (!amountSplit.isValid) {
+                throw new Error(amountSplit.error);
             }
 
-            // Create the transaction
+            const cashBalance = amountSplit.cashAmount;
+            const bankBalance = amountSplit.bankAmount;
+
+            // Create the transaction with correct cash/bank amounts
             const transaction = await db.Transaction.create({
                 account_id: data.account_id,
                 ledger_head_id: data.ledger_head_id,
@@ -145,10 +139,8 @@ class TransactionService {
                 booklet_id: data.booklet_id,
                 receipt_no: receiptNo,
                 amount: data.amount,
-                cash_amount: data.cash_type === 'cash' ? data.amount :
-                    data.cash_type === 'multiple' ? (data.cash_amount || 0) : 0,
-                bank_amount: data.cash_type === 'bank' ? data.amount :
-                    data.cash_type === 'multiple' ? (data.bank_amount || 0) : 0,
+                cash_amount: cashBalance,
+                bank_amount: bankBalance,
                 tx_type: 'credit',
                 cash_type: data.cash_type,
                 tx_date: data.tx_date,
@@ -188,8 +180,8 @@ class TransactionService {
                         splitBankAmount = parseFloat(split.amount);
                     }
 
-                    // Update the ledger head balance with properly proportioned cash/bank amounts
-                    await this.updateLedgerHeadBalance(
+                    // Update the ledger head balance using the new balance calculation service
+                    await balanceCalculationService.updateLedgerHeadBalance(
                         split.ledger_head_id,
                         split.amount,
                         splitCashAmount,
@@ -215,8 +207,8 @@ class TransactionService {
                     side: '+'
                 }, { transaction: t });
 
-                // Update the ledger head balance
-                await this.updateLedgerHeadBalance(
+                // Update the ledger head balance using the new balance calculation service
+                await balanceCalculationService.updateLedgerHeadBalance(
                     data.ledger_head_id,
                     data.amount,
                     cashBalance,
@@ -449,48 +441,41 @@ class TransactionService {
 
             // Only update balances if this is NOT a cheque transaction
             if (!data.is_cheque && actualCashType !== 'cheque') {
-                // Update the target ledger head balance
-                let cashBalanceTarget, bankBalanceTarget;
+                // Calculate proper cash/bank split for target ledger (debit head)
+                const targetAmountSplit = balanceCalculationService.calculateAmountSplit(
+                    data.cash_type,
+                    data.amount,
+                    data.cash_amount,
+                    data.bank_amount
+                );
 
-                if (data.cash_type === 'multiple') {
-                    cashBalanceTarget = parseFloat(data.cash_amount || 0);
-                    bankBalanceTarget = parseFloat(data.bank_amount || 0);
-                } else {
-                    cashBalanceTarget = ['cash'].includes(data.cash_type) ? parseFloat(data.amount) : 0;
-                    bankBalanceTarget = ['cash'].includes(data.cash_type) ? 0 : parseFloat(data.amount);
+                if (!targetAmountSplit.isValid) {
+                    throw new Error(targetAmountSplit.error);
                 }
 
-                await this.updateLedgerHeadBalance(
+                // Update the target ledger head balance (debit head gets credit)
+                await balanceCalculationService.updateLedgerHeadBalance(
                     data.ledger_head_id,
                     data.amount,
-                    cashBalanceTarget,
-                    bankBalanceTarget,
+                    targetAmountSplit.cashAmount,
+                    targetAmountSplit.bankAmount,
                     '+',
                     data.tx_date,
                     t
                 );
 
-                // Update the source ledger head balances
+                // Update the source ledger head balances (credit heads get debited)
                 for (const source of data.sources) {
-                    let cashBalanceSource, bankBalanceSource;
+                    // Calculate proportional amounts for this source
+                    const sourceProportion = parseFloat(source.amount) / parseFloat(data.amount);
+                    const sourceCashAmount = targetAmountSplit.cashAmount * sourceProportion;
+                    const sourceBankAmount = targetAmountSplit.bankAmount * sourceProportion;
 
-                    if (data.cash_type === 'multiple') {
-                        // Calculate the proper proportion for cash and bank
-                        const cashRatio = parseFloat(data.cash_amount) / parseFloat(data.amount);
-                        const bankRatio = parseFloat(data.bank_amount) / parseFloat(data.amount);
-
-                        cashBalanceSource = parseFloat(source.amount) * cashRatio;
-                        bankBalanceSource = parseFloat(source.amount) * bankRatio;
-                    } else {
-                        cashBalanceSource = ['cash'].includes(data.cash_type) ? parseFloat(source.amount) : 0;
-                        bankBalanceSource = ['cash'].includes(data.cash_type) ? 0 : parseFloat(source.amount);
-                    }
-
-                    await this.updateLedgerHeadBalance(
+                    await balanceCalculationService.updateLedgerHeadBalance(
                         source.ledger_head_id,
                         source.amount,
-                        cashBalanceSource,
-                        bankBalanceSource,
+                        sourceCashAmount,
+                        sourceBankAmount,
                         '-',
                         data.tx_date,
                         t
@@ -730,18 +715,26 @@ class TransactionService {
 
             // Reverse all balance changes
             for (const item of transaction.items) {
-                // Determine if this was a cash or bank transaction
-                const isBank = !['cash'].includes(transaction.cash_type);
-                const cashAmount = isBank ? 0 : parseFloat(item.amount);
-                const bankAmount = isBank ? parseFloat(item.amount) : 0;
+                // Calculate proportional cash and bank amounts for this item
+                const totalTxAmount = parseFloat(transaction.amount);
+                const itemAmount = parseFloat(item.amount);
+                const proportion = itemAmount / totalTxAmount;
+                
+                const totalCashAmount = parseFloat(transaction.cash_amount || 0);
+                const totalBankAmount = parseFloat(transaction.bank_amount || 0);
+                
+                const cashAmount = totalCashAmount * proportion;
+                const bankAmount = totalBankAmount * proportion;
 
                 // Flip the side (+ becomes -, - becomes +)
                 const reverseSide = item.side === '+' ? '-' : '+';
 
+                console.log(`Voiding item: Ledger ${item.ledger_head_id}, Amount: ₹${itemAmount}, Cash: ₹${cashAmount}, Bank: ₹${bankAmount}, Side: ${item.side} → ${reverseSide}`);
+
                 // Update the ledger head balance in reverse
-                await this.updateLedgerHeadBalance(
+                await balanceCalculationService.updateLedgerHeadBalance(
                     item.ledger_head_id,
-                    item.amount,
+                    itemAmount,
                     cashAmount,
                     bankAmount,
                     reverseSide,
@@ -819,8 +812,7 @@ class TransactionService {
             bank_balance: newBankBalance
         }, { transaction });
 
-        // Find and update the associated account
-        await this.updateAccountBalance(ledgerHead.account_id, cashAmount, bankAmount, side, transaction);
+        // Note: Account balance update is now handled within the balance calculation service
 
         // Check if a monthly balance record exists for this month
         let monthlyBalance = await db.MonthlyLedgerBalance.findOne({
@@ -991,118 +983,6 @@ class TransactionService {
         console.log(`Ledger head balance updated: ${ledgerHeadId}, current balance: ${newCurrentBalance}`);
     }
 
-    /**
-     * Ensure that only one accounting period is marked as open
-     * @param {number} accountId - The account ID
-     * @param {Transaction} transaction - Sequelize transaction
-     * @param {boolean} [preserveUserOpenPeriod=true] - Whether to preserve the user's manually opened period
-     * @returns {Promise<void>}
-     */
-    async ensureOnlyCurrentPeriodOpen(accountId, transaction, preserveUserOpenPeriod = true) {
-        // Get the current date for default calculation
-        const currentDate = new Date();
-        const calendarMonth = currentDate.getMonth() + 1;
-        const calendarYear = currentDate.getFullYear();
-
-        // If we need to preserve the user's open period, find it first
-        let targetMonth = calendarMonth;
-        let targetYear = calendarYear;
-
-        if (preserveUserOpenPeriod) {
-            try {
-                // Find the currently open period for this account
-                const openPeriod = await db.MonthlyLedgerBalance.findOne({
-                    where: {
-                        account_id: accountId,
-                        is_open: true
-                    },
-                    order: [['year', 'DESC'], ['month', 'DESC']],
-                    transaction
-                });
-
-                // If found, use this period instead of the calendar period
-                if (openPeriod) {
-                    targetMonth = openPeriod.month;
-                    targetYear = openPeriod.year;
-                    console.log(`Found user's open period: ${targetMonth}/${targetYear}, will preserve it`);
-                }
-            } catch (error) {
-                console.error('Error finding user open period:', error);
-                // Fall back to calendar month/year
-            }
-        }
-
-        console.log(`Ensuring only period ${targetMonth}/${targetYear} is open for account ${accountId}`);
-
-        try {
-            // First, close ALL periods for this account to avoid constraint violations
-            await db.MonthlyLedgerBalance.update(
-                { is_open: false },
-                {
-                    where: {
-                        account_id: accountId,
-                        is_open: true
-                    },
-                    transaction
-                }
-            );
-
-            // Now, find the target period for the first ledger head
-            const targetPeriod = await db.MonthlyLedgerBalance.findOne({
-                where: {
-                    account_id: accountId,
-                    month: targetMonth,
-                    year: targetYear,
-                    ledger_head_id: {
-                        [Op.in]: sequelize.literal(`(SELECT id FROM ledger_heads WHERE account_id = ${accountId} ORDER BY id LIMIT 1)`)
-                    }
-                },
-                transaction
-            });
-
-            // If we found the target period, open it
-            if (targetPeriod) {
-                await targetPeriod.update({ is_open: true }, { transaction });
-                console.log(`Opened period ${targetMonth}/${targetYear} for account ${accountId}`);
-            } else {
-                // This means the period doesn't exist yet for the ledger head
-                console.log(`Target period ${targetMonth}/${targetYear} not found for account ${accountId}`);
-
-                // Get the first ledger head for the account
-                const firstLedgerHead = await db.LedgerHead.findOne({
-                    where: { account_id: accountId },
-                    order: [['id', 'ASC']],
-                    transaction
-                });
-
-                if (!firstLedgerHead) {
-                    throw new Error(`No ledger heads found for account ${accountId}`);
-                }
-
-                // Create the period and set it as open
-                await db.MonthlyLedgerBalance.create({
-                    account_id: accountId,
-                    ledger_head_id: firstLedgerHead.id,
-                    month: targetMonth,
-                    year: targetYear,
-                    opening_balance: 0,
-                    receipts: 0,
-                    payments: 0,
-                    closing_balance: 0,
-                    cash_in_hand: 0,
-                    cash_in_bank: 0,
-                    is_open: true
-                }, { transaction });
-
-                console.log(`Created and opened new period ${targetMonth}/${targetYear} for account ${accountId}`);
-            }
-        } catch (error) {
-            console.error(`Error ensuring period ${targetMonth}/${targetYear} is open for account ${accountId}:`, error);
-            throw error;
-        }
-
-        console.log(`Period locking complete for account ${accountId}, keeping ${targetMonth}/${targetYear} open`);
-    }
 
     /**
      * Update account balance when ledger head balances change
