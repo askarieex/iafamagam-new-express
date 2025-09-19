@@ -2,10 +2,12 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
+  "/dashboard": "pages/dashboard.js",
+  "/auth/login": "pages/auth/login.js",
+  "/accounts": "pages/accounts.js",
   "/transactions": "pages/transactions.js",
-  "/donors": "pages/donors.js",
-  "/cheque-management": "pages/cheque-management.js",
-  "/booklets": "pages/booklets.js",
+  "/": "pages/index.js",
   "/manage-ledger": "pages/manage-ledger.js",
-  "/ledger-snapshots": "pages/ledger-snapshots.js"
+  "/donors": "pages/donors.js",
+  "/cheque-management": "pages/cheque-management.js"
 }

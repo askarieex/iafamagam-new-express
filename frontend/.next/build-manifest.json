@@ -12,6 +12,11 @@
   ],
   "rootMainFiles": [],
   "pages": {
+    "/": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/index.js"
+    ],
     "/_app": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
@@ -22,25 +27,30 @@
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/booklets": [
+    "/accounts": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/booklets.js"
+      "static/chunks/pages/accounts.js"
+    ],
+    "/auth/login": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/auth/login.js"
     ],
     "/cheque-management": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
       "static/chunks/pages/cheque-management.js"
     ],
+    "/dashboard": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/dashboard.js"
+    ],
     "/donors": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
       "static/chunks/pages/donors.js"
-    ],
-    "/ledger-snapshots": [
-      "static/chunks/webpack.js",
-      "static/chunks/main.js",
-      "static/chunks/pages/ledger-snapshots.js"
     ],
     "/manage-ledger": [
       "static/chunks/webpack.js",

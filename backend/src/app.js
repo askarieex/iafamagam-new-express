@@ -28,6 +28,7 @@ const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 const reconciliationRoutes = require('./routes/reconciliationRoutes');
 const periodManagementRoutes = require('./routes/periodManagementRoutes');
 const globalPeriodRoutes = require('./routes/globalPeriodRoutes');
+const dependencyRoutes = require('./routes/dependencyRoutes');
 const monthlyClosureController = require('./controllers/monthlyClosureController');
 const periodService = require('./services/periodManagementService');
 const globalPeriodService = require('./services/globalPeriodService');
@@ -50,7 +51,8 @@ app.use('/api/cheques', protect, chequeRoutes);
 app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
 app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
 app.use('/api/periods', protect, periodManagementRoutes);
-app.use('/api/global-periods', protect, globalPeriodRoutes); 
+app.use('/api/global-periods', protect, globalPeriodRoutes);
+app.use('/api/ledger-heads', protect, dependencyRoutes); 
 
 // Add this function before the app.listen call
 /**
