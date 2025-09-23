@@ -19,19 +19,12 @@ const userRoutes = require('./routes/userRoutes');
 const accountRoutes = require('./routes/accountRoutes');
 const bankAccountRoutes = require('./routes/bankAccountRoutes');
 const ledgerHeadRoutes = require('./routes/ledgerHeadRoutes');
-const monthlyLedgerBalanceRoutes = require('./routes/monthlyLedgerBalanceRoutes');
 const donorRoutes = require('./routes/donorRoutes');
 const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
-const monthlyClosureRoutes = require('./routes/monthlyClosureRoutes');
 const reconciliationRoutes = require('./routes/reconciliationRoutes');
-const periodManagementRoutes = require('./routes/periodManagementRoutes');
-const globalPeriodRoutes = require('./routes/globalPeriodRoutes');
 const dependencyRoutes = require('./routes/dependencyRoutes');
-const monthlyClosureController = require('./controllers/monthlyClosureController');
-const periodService = require('./services/periodManagementService');
-const globalPeriodService = require('./services/globalPeriodService');
 const db = require('./models');
 // ... other route imports ...
 
@@ -43,52 +36,18 @@ app.use('/api/users', userRoutes);
 app.use('/api/accounts', protect, accountRoutes);
 app.use('/api/bank-accounts', protect, bankAccountRoutes);
 app.use('/api/ledger-heads', protect, ledgerHeadRoutes);
-app.use('/api/monthly-ledger-balances', protect, monthlyLedgerBalanceRoutes);
 app.use('/api/donors', protect, donorRoutes);
 app.use('/api/booklets', protect, bookletRoutes);
 app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
-app.use('/api/monthly-closure', protect, monthlyClosureRoutes);
 app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
-app.use('/api/periods', protect, periodManagementRoutes);
-app.use('/api/global-periods', protect, globalPeriodRoutes);
 app.use('/api/ledger-heads', protect, dependencyRoutes); 
 
-// Add this function before the app.listen call
-/**
- * Initialize system startup tasks
- */
-const runSystemStartupTasks = async () => {
-  try {
-    console.log('Running system startup tasks...');
-    
-    // 1. Ensure global period is open (replaces account-specific period management)
-    console.log('Checking global period status...');
-    try {
-      const result = await globalPeriodService.autoEnsureCurrentPeriodOpen();
-      if (result.success && result.autoOpened) {
-        console.log('Auto-opened current global period');
-      } else if (result.success) {
-        console.log('Global period already open');
-      } else {
-        console.error('Failed to ensure global period is open:', result.error);
-      }
-    } catch (err) {
-      console.error('Error managing global period:', err);
-    }
-    
-    console.log('System startup tasks completed');
-  } catch (error) {
-    console.error('Error running system startup tasks:', error);
-  }
-};
-
-// Modify the app.listen call to run startup tasks first
 const PORT = process.env.PORT || 3001;
 db.sequelize.sync().then(() => {
-  runSystemStartupTasks().then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
   });
-}); 
+});
+
+module.exports = app; 

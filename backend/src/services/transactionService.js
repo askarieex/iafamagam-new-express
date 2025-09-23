@@ -2,7 +2,6 @@ const db = require('../models');
 const sequelize = db.sequelize;
 const { Op } = require('sequelize');
 const balanceCalculationService = require('./balanceCalculationService');
-const periodService = require('./periodManagementService');
 
 /**
  * Transaction Service - handles all transaction-related operations
