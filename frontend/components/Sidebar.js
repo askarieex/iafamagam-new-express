@@ -104,20 +104,8 @@ const Sidebar = ({ isOpen, toggleSidebar, lightMode = false }) => {
             items: [
                 {
                     name: 'Financial Reports',
-                    path: '/reports',
+                    path: '/monthly-reports',
                     icon: <FaFileInvoiceDollar />,
-                    permission: 'reports'
-                },
-                {
-                    name: 'Period Management',
-                    path: '/period-management',
-                    icon: <FaCalendarAlt />,
-                    permission: 'reports'
-                },
-                {
-                    name: 'Ledger Snapshots',
-                    path: '/ledger-snapshots',
-                    icon: <FaChartBar />,
                     permission: 'reports'
                 },
                 {

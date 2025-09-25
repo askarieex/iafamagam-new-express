@@ -99,7 +99,12 @@ const BookletsPage = () => {
                 ? `${API_URL}/booklets?active=true`
                 : `${API_URL}/booklets`;
 
-            const response = await axios.get(url);
+            const token = localStorage.getItem('token');
+            const response = await axios.get(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
 
             // Debug data to see what format dates are in
             if (response.data.data.length > 0) {
@@ -162,7 +167,12 @@ const BookletsPage = () => {
 
         try {
             setLoading(true);
-            const response = await axios.post(`${API_URL}/booklets`, formData);
+            const token = localStorage.getItem('token');
+            const response = await axios.post(`${API_URL}/booklets`, formData, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
 
             // Check if any receipt numbers were excluded
             if (response.data.excludedReceiptNumbers && response.data.excludedReceiptNumbers.length > 0) {
@@ -214,10 +224,15 @@ const BookletsPage = () => {
                 }
             }
 
+            const token = localStorage.getItem('token');
             const response = await axios.put(`${API_URL}/booklets/${editData.id}`, {
                 booklet_no: editData.booklet_no,
                 start_no: editData.start_no,
                 end_no: editData.end_no
+            }, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
             });
 
             toast.success('Booklet updated successfully');
@@ -239,7 +254,12 @@ const BookletsPage = () => {
 
         try {
             setLoading(true);
-            const response = await axios.delete(`${API_URL}/booklets/${confirmDelete}`);
+            const token = localStorage.getItem('token');
+            const response = await axios.delete(`${API_URL}/booklets/${confirmDelete}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
 
             // Check if any transactions were preserved
             if (response.data.transactionsPreserved > 0) {
@@ -262,7 +282,12 @@ const BookletsPage = () => {
 
         try {
             setLoading(true);
-            await axios.patch(`${API_URL}/booklets/${id}/close`);
+            const token = localStorage.getItem('token');
+            await axios.patch(`${API_URL}/booklets/${id}/close`, {}, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             toast.success('Booklet closed successfully');
             fetchBooklets();
         } catch (error) {
@@ -275,7 +300,12 @@ const BookletsPage = () => {
     const handleViewBooklet = async (id) => {
         try {
             setLoading(true);
-            const response = await axios.get(`${API_URL}/booklets/${id}`);
+            const token = localStorage.getItem('token');
+            const response = await axios.get(`${API_URL}/booklets/${id}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             setViewingBooklet(response.data.data);
             setShowViewModal(true);
             setLoading(false);

@@ -6,7 +6,6 @@ const { authorize } = require('../middleware/authMiddleware');
 
 // Protected routes for all authenticated users - read operations
 router.get('/', protect, ledgerHeadController.getAllLedgerHeads);
-router.get('/validation/dependencies', protect, ledgerHeadController.validateDependencies);
 router.get('/:id', protect, ledgerHeadController.getLedgerHeadById);
 
 // Admin-only routes - write operations

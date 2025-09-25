@@ -1,0 +1,670 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import {
+    FaSave,
+    FaTimes,
+    FaCalendarAlt,
+    FaRupeeSign,
+    FaMoneyBillWave,
+    FaUniversity,
+    FaInfoCircle,
+    FaSpinner
+} from 'react-icons/fa';
+import API_CONFIG from '../../config';
+import { toast } from 'react-toastify';
+
+export default function CreditTransactionForm({ onSuccess, onCancel, transaction = null, isEditing = false }) {
+    const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+
+    // Form state with step-by-step progression
+    const [currentStep, setCurrentStep] = useState(1); // 1: Date, 2: Account, 3: Ledger, 4: Payment, 5: Amount
+    const [isDateSelected, setIsDateSelected] = useState(false);
+
+    // Form data
+    const [formData, setFormData] = useState({
+        tx_date: '',
+        account_id: '',
+        ledger_head_id: '',
+        donor_id: '',
+        booklet_id: '',
+        receipt_no: '',
+        amount: '',
+        cash_amount: '',
+        bank_amount: '',
+        cash_type: 'cash',
+        description: ''
+    });
+
+    // Options
+    const [accounts, setAccounts] = useState([]);
+    const [ledgerHeads, setLedgerHeads] = useState([]);
+    const [donors, setDonors] = useState([]);
+    const [booklets, setBooklets] = useState([]);
+
+    // Balance display
+    const [ledgerBalance, setLedgerBalance] = useState(null);
+
+    // Form validation errors
+    const [errors, setErrors] = useState({});
+
+    // API instance
+    const api = axios.create({
+        baseURL: API_CONFIG.API_URL,
+        headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+    });
+
+    useEffect(() => {
+        initializeForm();
+    }, []);
+
+    const initializeForm = async () => {
+        try {
+            setLoading(true);
+            await Promise.all([
+                fetchAccounts(),
+                fetchDonors()
+            ]);
+
+            // If editing, populate form
+            if (isEditing && transaction) {
+                setFormData({
+                    tx_date: transaction.tx_date || '',
+                    account_id: transaction.account_id || '',
+                    ledger_head_id: transaction.ledger_head_id || '',
+                    donor_id: transaction.donor_id || '',
+                    booklet_id: transaction.booklet_id || '',
+                    receipt_no: transaction.receipt_no || '',
+                    amount: transaction.amount || '',
+                    cash_amount: transaction.cash_amount || '',
+                    bank_amount: transaction.bank_amount || '',
+                    cash_type: transaction.cash_type || 'cash',
+                    description: transaction.description || ''
+                });
+
+                // Set appropriate steps as completed
+                if (transaction.tx_date) setIsDateSelected(true);
+                if (transaction.account_id) await fetchLedgerHeads(transaction.account_id);
+                if (transaction.account_id) await fetchBooklets(transaction.account_id);
+            }
+        } catch (error) {
+            console.error('Error initializing form:', error);
+            toast.error('Failed to load form data');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchAccounts = async () => {
+        try {
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/accounts`);
+            if (response.data.success) {
+                setAccounts(response.data.data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching accounts:', error);
+        }
+    };
+
+    const fetchDonors = async () => {
+        try {
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/donors`);
+            if (response.data.success) {
+                setDonors(response.data.data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching donors:', error);
+        }
+    };
+
+    const fetchLedgerHeads = async (accountId) => {
+        try {
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/ledger-heads`, {
+                params: { account_id: accountId }
+            });
+            if (response.data.success) {
+                setLedgerHeads(response.data.data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching ledger heads:', error);
+        }
+    };
+
+    const fetchBooklets = async (accountId) => {
+        try {
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/booklets`, {
+                params: { account_id: accountId }
+            });
+            if (response.data.success) {
+                setBooklets(response.data.data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching booklets:', error);
+        }
+    };
+
+    const fetchLedgerBalance = async (accountId, ledgerHeadId, date) => {
+        try {
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/transactions/balances-for-date`, {
+                params: { account_id: accountId, date: date }
+            });
+
+            if (response.data.success) {
+                const ledgerData = response.data.data.find(l => l.id === parseInt(ledgerHeadId));
+                setLedgerBalance(ledgerData || null);
+            }
+        } catch (error) {
+            console.error('Error fetching ledger balance:', error);
+        }
+    };
+
+    // Basic date validation - only prevent future dates
+    const validateDate = (date) => {
+        const selectedDate = new Date(date);
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+
+        if (selectedDate > today) {
+            setErrors(prev => ({ ...prev, tx_date: 'Future transaction dates are not allowed' }));
+            return false;
+        }
+
+        setErrors(prev => ({ ...prev, tx_date: '' }));
+        return true;
+    };
+
+    const handleDateSelect = (date) => {
+        if (validateDate(date)) {
+            setFormData(prev => ({ ...prev, tx_date: date }));
+            setIsDateSelected(true);
+            setCurrentStep(2);
+        }
+    };
+
+    const handleAccountSelect = async (accountId) => {
+        setFormData(prev => ({ ...prev, account_id: accountId, ledger_head_id: '', booklet_id: '' }));
+        setLedgerHeads([]);
+        setBooklets([]);
+        setLedgerBalance(null);
+
+        await Promise.all([
+            fetchLedgerHeads(accountId),
+            fetchBooklets(accountId)
+        ]);
+
+        setCurrentStep(3);
+    };
+
+    const handleLedgerSelect = async (ledgerHeadId) => {
+        setFormData(prev => ({ ...prev, ledger_head_id: ledgerHeadId }));
+
+        if (formData.account_id && formData.tx_date) {
+            await fetchLedgerBalance(formData.account_id, ledgerHeadId, formData.tx_date);
+        }
+
+        setCurrentStep(4);
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+
+        // Clear errors
+        if (errors[name]) {
+            setErrors(prev => ({ ...prev, [name]: '' }));
+        }
+    };
+
+    const handleAmountChange = (cashType) => {
+        setFormData(prev => ({ ...prev, cash_type: cashType }));
+        setCurrentStep(5);
+    };
+
+    const validateForm = () => {
+        const newErrors = {};
+
+        if (!formData.tx_date) newErrors.tx_date = 'Transaction date is required';
+        if (!formData.account_id) newErrors.account_id = 'Account is required';
+        if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Ledger head is required';
+        if (!formData.booklet_id) newErrors.booklet_id = 'Booklet is required';
+        if (!formData.receipt_no) newErrors.receipt_no = 'Receipt number is required';
+        if (!formData.amount || parseFloat(formData.amount) <= 0) newErrors.amount = 'Valid amount is required';
+
+        if (formData.cash_type === 'cash') {
+            formData.cash_amount = formData.amount;
+            formData.bank_amount = '';
+        } else if (formData.cash_type === 'bank') {
+            formData.bank_amount = formData.amount;
+            formData.cash_amount = '';
+        } else if (formData.cash_type === 'multiple') {
+            if (!formData.cash_amount || parseFloat(formData.cash_amount) < 0) {
+                newErrors.cash_amount = 'Cash amount is required for multiple payment type';
+            }
+            if (!formData.bank_amount || parseFloat(formData.bank_amount) < 0) {
+                newErrors.bank_amount = 'Bank amount is required for multiple payment type';
+            }
+            if (formData.cash_amount && formData.bank_amount) {
+                const totalSplit = parseFloat(formData.cash_amount) + parseFloat(formData.bank_amount);
+                const totalAmount = parseFloat(formData.amount);
+                if (Math.abs(totalSplit - totalAmount) > 0.01) {
+                    newErrors.amount = 'Cash amount + Bank amount must equal total amount';
+                }
+            }
+        }
+
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+
+        if (!validateForm()) {
+            toast.error('Please fix the validation errors');
+            return;
+        }
+
+        setSubmitting(true);
+
+        try {
+            const endpoint = isEditing
+                ? `${API_CONFIG.API_PREFIX}/transactions/${transaction.id}`
+                : `${API_CONFIG.API_PREFIX}/transactions/credit`;
+
+            const method = isEditing ? 'PUT' : 'POST';
+
+            const response = await api.request({
+                method,
+                url: endpoint,
+                data: formData
+            });
+
+            if (response.data.success) {
+                toast.success(isEditing ? 'Transaction updated successfully' : 'Credit transaction created successfully');
+                if (onSuccess) onSuccess(response.data.data);
+            } else {
+                toast.error(response.data.message || 'Failed to save transaction');
+            }
+        } catch (error) {
+            console.error('Error saving transaction:', error);
+            toast.error(error.response?.data?.message || 'Failed to save transaction');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center py-8">
+                <FaSpinner className="animate-spin text-2xl text-blue-600" />
+                <span className="ml-2">Loading form...</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="max-w-4xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {isEditing ? 'Edit Credit Transaction' : 'New Credit Transaction'}
+                </h2>
+                <button
+                    onClick={onCancel}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                    <FaTimes size={24} />
+                </button>
+            </div>
+
+            {/* Progress Steps */}
+            <div className="mb-8">
+                <div className="flex items-center justify-between">
+                    {[1, 2, 3, 4, 5].map((step) => (
+                        <div key={step} className="flex items-center">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                                currentStep >= step
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-300 text-gray-700'
+                            }`}>
+                                {step}
+                            </div>
+                            {step < 5 && (
+                                <div className={`w-16 h-1 mx-2 ${
+                                    currentStep > step ? 'bg-blue-600' : 'bg-gray-300'
+                                }`} />
+                            )}
+                        </div>
+                    ))}
+                </div>
+                <div className="flex justify-between mt-2 text-xs text-gray-600 dark:text-gray-400">
+                    <span>Date</span>
+                    <span>Account</span>
+                    <span>Ledger</span>
+                    <span>Payment</span>
+                    <span>Amount</span>
+                </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Step 1: Date Selection */}
+                <div className={`p-4 border rounded-lg ${currentStep >= 1 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300'}`}>
+                    <div className="flex items-center mb-3">
+                        <FaCalendarAlt className="text-blue-600 mr-2" />
+                        <h3 className="text-lg font-medium">Transaction Date</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Date *</label>
+                            <input
+                                type="date"
+                                name="tx_date"
+                                value={formData.tx_date}
+                                onChange={(e) => handleDateSelect(e.target.value)}
+                                max={new Date().toISOString().split('T')[0]}
+                                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                    errors.tx_date ? 'border-red-500' : 'border-gray-300'
+                                }`}
+                                required
+                            />
+                            {errors.tx_date && (
+                                <p className="text-red-500 text-sm mt-1">{errors.tx_date}</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Step 2: Account Selection */}
+                {currentStep >= 2 && (
+                    <div className={`p-4 border rounded-lg ${currentStep >= 2 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300'}`}>
+                        <div className="flex items-center mb-3">
+                            <FaUniversity className="text-blue-600 mr-2" />
+                            <h3 className="text-lg font-medium">Account Selection</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Account *</label>
+                                <select
+                                    name="account_id"
+                                    value={formData.account_id}
+                                    onChange={(e) => handleAccountSelect(e.target.value)}
+                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        errors.account_id ? 'border-red-500' : 'border-gray-300'
+                                    }`}
+                                    required
+                                >
+                                    <option value="">Select an account</option>
+                                    {accounts.map((account) => (
+                                        <option key={account.id} value={account.id}>
+                                            {account.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.account_id && (
+                                    <p className="text-red-500 text-sm mt-1">{errors.account_id}</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Step 3: Ledger Head & Donor */}
+                {currentStep >= 3 && (
+                    <div className={`p-4 border rounded-lg ${currentStep >= 3 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300'}`}>
+                        <div className="flex items-center mb-3">
+                            <FaMoneyBillWave className="text-blue-600 mr-2" />
+                            <h3 className="text-lg font-medium">Ledger & Donor Information</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Ledger Head *</label>
+                                <select
+                                    name="ledger_head_id"
+                                    value={formData.ledger_head_id}
+                                    onChange={(e) => handleLedgerSelect(e.target.value)}
+                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        errors.ledger_head_id ? 'border-red-500' : 'border-gray-300'
+                                    }`}
+                                    required
+                                >
+                                    <option value="">Select a ledger head</option>
+                                    {ledgerHeads.map((ledger) => (
+                                        <option key={ledger.id} value={ledger.id}>
+                                            {ledger.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.ledger_head_id && (
+                                    <p className="text-red-500 text-sm mt-1">{errors.ledger_head_id}</p>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Donor (Optional)</label>
+                                <select
+                                    name="donor_id"
+                                    value={formData.donor_id}
+                                    onChange={handleInputChange}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">No specific donor</option>
+                                    {donors.map((donor) => (
+                                        <option key={donor.id} value={donor.id}>
+                                            {donor.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Current Balance Display */}
+                        {ledgerBalance && (
+                            <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
+                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                    <strong>Current Balance:</strong> ₹{ledgerBalance.current_balance || 0}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Step 4: Payment Method */}
+                {currentStep >= 4 && (
+                    <div className={`p-4 border rounded-lg ${currentStep >= 4 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300'}`}>
+                        <div className="flex items-center mb-3">
+                            <FaMoneyBillWave className="text-blue-600 mr-2" />
+                            <h3 className="text-lg font-medium">Payment Method</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            {[
+                                { value: 'cash', label: 'Cash Only', icon: '💵' },
+                                { value: 'bank', label: 'Bank Only', icon: '🏦' },
+                                { value: 'multiple', label: 'Cash + Bank', icon: '💳' }
+                            ].map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => handleAmountChange(option.value)}
+                                    className={`p-4 border-2 rounded-lg text-center transition-colors ${
+                                        formData.cash_type === option.value
+                                            ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/30'
+                                            : 'border-gray-300 hover:border-blue-300'
+                                    }`}
+                                >
+                                    <div className="text-2xl mb-2">{option.icon}</div>
+                                    <div className="font-medium">{option.label}</div>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Booklet *</label>
+                                <select
+                                    name="booklet_id"
+                                    value={formData.booklet_id}
+                                    onChange={handleInputChange}
+                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        errors.booklet_id ? 'border-red-500' : 'border-gray-300'
+                                    }`}
+                                    required
+                                >
+                                    <option value="">Select a booklet</option>
+                                    {booklets.map((booklet) => (
+                                        <option key={booklet.id} value={booklet.id}>
+                                            {booklet.name} (Start: {booklet.start_serial})
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.booklet_id && (
+                                    <p className="text-red-500 text-sm mt-1">{errors.booklet_id}</p>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Receipt Number *</label>
+                                <input
+                                    type="text"
+                                    name="receipt_no"
+                                    value={formData.receipt_no}
+                                    onChange={handleInputChange}
+                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        errors.receipt_no ? 'border-red-500' : 'border-gray-300'
+                                    }`}
+                                    placeholder="Enter receipt number"
+                                    required
+                                />
+                                {errors.receipt_no && (
+                                    <p className="text-red-500 text-sm mt-1">{errors.receipt_no}</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Step 5: Amount Details */}
+                {currentStep >= 5 && (
+                    <div className={`p-4 border rounded-lg border-blue-500 bg-blue-50 dark:bg-blue-900/20`}>
+                        <div className="flex items-center mb-3">
+                            <FaRupeeSign className="text-blue-600 mr-2" />
+                            <h3 className="text-lg font-medium">Amount Details</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Total Amount *</label>
+                                <input
+                                    type="number"
+                                    name="amount"
+                                    value={formData.amount}
+                                    onChange={handleInputChange}
+                                    step="0.01"
+                                    min="0.01"
+                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                        errors.amount ? 'border-red-500' : 'border-gray-300'
+                                    }`}
+                                    placeholder="0.00"
+                                    required
+                                />
+                                {errors.amount && (
+                                    <p className="text-red-500 text-sm mt-1">{errors.amount}</p>
+                                )}
+                            </div>
+
+                            {formData.cash_type === 'multiple' && (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Cash Amount *</label>
+                                        <input
+                                            type="number"
+                                            name="cash_amount"
+                                            value={formData.cash_amount}
+                                            onChange={handleInputChange}
+                                            step="0.01"
+                                            min="0"
+                                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                errors.cash_amount ? 'border-red-500' : 'border-gray-300'
+                                            }`}
+                                            placeholder="0.00"
+                                        />
+                                        {errors.cash_amount && (
+                                            <p className="text-red-500 text-sm mt-1">{errors.cash_amount}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Bank Amount *</label>
+                                        <input
+                                            type="number"
+                                            name="bank_amount"
+                                            value={formData.bank_amount}
+                                            onChange={handleInputChange}
+                                            step="0.01"
+                                            min="0"
+                                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                errors.bank_amount ? 'border-red-500' : 'border-gray-300'
+                                            }`}
+                                            placeholder="0.00"
+                                        />
+                                        {errors.bank_amount && (
+                                            <p className="text-red-500 text-sm mt-1">{errors.bank_amount}</p>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="mt-4">
+                            <label className="block text-sm font-medium mb-1">Description (Optional)</label>
+                            <textarea
+                                name="description"
+                                value={formData.description}
+                                onChange={handleInputChange}
+                                rows="3"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Additional notes about this transaction..."
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Submit Buttons */}
+                <div className="flex justify-end space-x-4">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={submitting || currentStep < 5}
+                        className={`px-6 py-2 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center ${
+                            submitting || currentStep < 5
+                                ? 'bg-gray-400 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
+                    >
+                        {submitting ? (
+                            <>
+                                <FaSpinner className="animate-spin mr-2" />
+                                Saving...
+                            </>
+                        ) : (
+                            <>
+                                <FaSave className="mr-2" />
+                                {isEditing ? 'Update Transaction' : 'Save Transaction'}
+                            </>
+                        )}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}

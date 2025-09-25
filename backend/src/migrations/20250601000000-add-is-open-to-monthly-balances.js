@@ -3,25 +3,37 @@
 module.exports = {
     async up(queryInterface, Sequelize) {
         try {
-            // Add is_open column
-            await queryInterface.addColumn('monthly_ledger_balances', 'is_open', {
-                type: Sequelize.BOOLEAN,
-                allowNull: false,
-                defaultValue: false,
-                comment: 'Whether this period is currently open for transactions'
-            });
+            // Check if is_open column exists before adding
+            const tableDesc = await queryInterface.describeTable('monthly_ledger_balances');
+
+            if (!tableDesc.is_open) {
+                await queryInterface.addColumn('monthly_ledger_balances', 'is_open', {
+                    type: Sequelize.BOOLEAN,
+                    allowNull: false,
+                    defaultValue: false,
+                    comment: 'Whether this period is currently open for transactions'
+                });
+            }
 
             // Wait a moment to ensure the column is added before creating the index
             await queryInterface.sequelize.query('SELECT 1');
 
-            // Add index for one open period per account
-            await queryInterface.addIndex('monthly_ledger_balances', ['account_id', 'is_open'], {
-                unique: true,
-                name: 'one_open_period_per_account',
-                where: {
-                    is_open: true
+            // Check if index exists before adding
+            try {
+                await queryInterface.addIndex('monthly_ledger_balances', ['account_id', 'is_open'], {
+                    unique: true,
+                    name: 'one_open_period_per_account',
+                    where: {
+                        is_open: true
+                    }
+                });
+            } catch (indexError) {
+                if (indexError.message && indexError.message.includes('already exists')) {
+                    console.log('Index one_open_period_per_account already exists, skipping...');
+                } else {
+                    throw indexError;
                 }
-            });
+            }
 
             // Set current month for each account as open
             const [accounts] = await queryInterface.sequelize.query(`SELECT DISTINCT account_id FROM monthly_ledger_balances;`);

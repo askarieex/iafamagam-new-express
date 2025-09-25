@@ -259,6 +259,17 @@ export default function TransactionDetails({ transactionId, onBack, onEditTransa
                         Cash & Bank
                     </span>
                 );
+            case 'mixed':
+            case 'both':
+                return (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r from-green-50 via-blue-50 to-blue-50 text-gray-700 border border-purple-200">
+                        <div className="flex -space-x-0.5 mr-1">
+                            <FaMoneyBillWave className="text-green-600 text-xs" />
+                            <FaUniversity className="text-blue-600 text-xs" />
+                        </div>
+                        Cash & Bank
+                    </span>
+                );
             default:
                 return (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">

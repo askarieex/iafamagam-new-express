@@ -790,9 +790,9 @@ class TransactionService {
         const year = txDateObj.getFullYear();
 
         // Update ledger head current balance
-        let newCurrentBalance = parseFloat(ledgerHead.current_balance);
-        let newCashBalance = parseFloat(ledgerHead.cash_balance);
-        let newBankBalance = parseFloat(ledgerHead.bank_balance);
+        let newCurrentBalance = parseFloat(ledgerHead.current_balance || 0);
+        let newCashBalance = parseFloat(ledgerHead.cash_balance || 0);
+        let newBankBalance = parseFloat(ledgerHead.bank_balance || 0);
 
         if (side === '+') {
             newCurrentBalance += parseFloat(amount);
@@ -999,8 +999,8 @@ class TransactionService {
         }
 
         // Parse current balances
-        let newCashBalance = parseFloat(account.cash_balance);
-        let newBankBalance = parseFloat(account.bank_balance);
+        let newCashBalance = parseFloat(account.cash_balance || 0);
+        let newBankBalance = parseFloat(account.bank_balance || 0);
 
         // Update balances based on side (+ or -)
         if (side === '+') {
@@ -1049,8 +1049,8 @@ class TransactionService {
                     let totalBankBalance = 0;
 
                     for (const ledgerHead of ledgerHeads) {
-                        totalCashBalance += parseFloat(ledgerHead.cash_balance);
-                        totalBankBalance += parseFloat(ledgerHead.bank_balance);
+                        totalCashBalance += parseFloat(ledgerHead.cash_balance || 0);
+                        totalBankBalance += parseFloat(ledgerHead.bank_balance || 0);
                     }
 
                     // Calculate new closing balance

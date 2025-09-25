@@ -24,7 +24,9 @@ import {
     FaExclamationTriangle,
     FaMoneyCheck,
     FaInfoCircle,
-    FaExchangeAlt
+    FaExchangeAlt,
+    FaShieldAlt,
+    FaLock
 } from 'react-icons/fa';
 import API_CONFIG from '../../config';
 import { toast } from 'react-toastify';
@@ -173,6 +175,7 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
             // Build query parameters
             let params = { page, limit };
 
+
             // Add filters to params if they exist
             Object.keys(filters).forEach(key => {
                 if (filters[key]) {
@@ -180,12 +183,19 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
                 }
             });
 
-            const response = await api.get('/api/transactions', { params });
+            // Use the new immutable transaction system endpoint
+            const response = await api.get('/api/transactions/history', {
+                params,
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            });
 
             if (response.data && response.data.success) {
-                setTransactions(response.data.transactions || []);
-                setTotalPages(response.data.totalPages || 1);
-                setTotalTransactions(response.data.total || 0);
+                // Handle new immutable transaction system data structure
+                setTransactions(response.data.data || []);
+                setTotalPages(1); // Update if pagination is implemented in new system
+                setTotalTransactions(response.data.count || 0);
 
                 // Update the counts and totals for different tabs
                 if (response.data.pendingTotal !== undefined) {
@@ -433,6 +443,17 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
                 colorClass = 'bg-gray-100 text-gray-800 border border-gray-200';
                 labelText = 'Multiple';
                 break;
+            case 'mixed':
+            case 'both':
+                icon = (
+                    <div className="flex -space-x-0.5">
+                        <FaMoneyBillWave className="text-green-600 text-xs" />
+                        <FaUniversity className="text-blue-600 text-xs" />
+                    </div>
+                );
+                colorClass = 'bg-gradient-to-r from-green-100 via-blue-50 to-blue-100 text-gray-800 border border-purple-200';
+                labelText = 'Both';
+                break;
             default:
                 icon = <FaMoneyBillWave className="mr-1.5" />;
                 colorClass = 'bg-gray-100 text-gray-800 border border-gray-200';
@@ -535,62 +556,137 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
         };
 
         return (
-            <tr key={transaction.id} className="hover:bg-gray-50 dark:hover:bg-secondary-800/50 border-b border-gray-100 dark:border-secondary-800 transition-colors">
-                <td className="px-3 py-2.5 text-xs">
-                    <span className="font-medium text-secondary-800 dark:text-secondary-200">
-                        {formatDate(transaction.createdAt)}
-                    </span>
+            <tr key={transaction.log_id || transaction.id} className="hover:bg-gradient-to-r hover:from-blue-50/30 hover:to-transparent dark:hover:from-blue-900/10 dark:hover:to-transparent transition-all duration-200 group animate-fadeIn hover:shadow-sm"
+                style={{
+                    animationDelay: `${Math.min((transactions.indexOf(transaction) * 50), 500)}ms`
+                }}>
+                {/* UUID Column */}
+                <td className="px-3 py-2">
+                    <div className="flex items-center space-x-2">
+                        <div className="flex-shrink-0 w-6 h-6 bg-gradient-to-br from-blue-400 to-blue-600 rounded-md flex items-center justify-center shadow-sm">
+                            <FaShieldAlt className="text-white text-xs" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="font-mono text-xs font-semibold text-gray-900 dark:text-gray-100">
+                                {transaction.transaction_uuid ? transaction.transaction_uuid.substring(0, 8) : (transaction.uuid || transaction.id)?.toString().substring(0, 8)}...
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                ID #{transaction.log_id || transaction.id}
+                            </span>
+                        </div>
+                    </div>
                 </td>
-                <td className="px-3 py-2.5">
-                    <div className="flex items-center">
-                        {transaction.tx_type === 'debit' ? (
-                            <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center">
-                                <FaArrowUp className="mr-1 text-[8px]" />
-                                Debit
-                            </div>
-                        ) : (
-                            <div className="bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center">
-                                <FaArrowDown className="mr-1 text-[8px]" />
-                                Credit
+
+                {/* Date Column */}
+                <td className="px-3 py-2">
+                    <div className="flex items-center space-x-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-green-400 to-green-600"></div>
+                        <div className="flex flex-col">
+                            <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                                {formatDate(transaction.transaction_date || transaction.created_at || transaction.createdAt)}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {new Date(transaction.transaction_date || transaction.created_at || transaction.createdAt).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}
+                            </span>
+                        </div>
+                    </div>
+                </td>
+
+                {/* Type Column */}
+                <td className="px-3 py-2">
+                    {transaction.tx_type === 'debit' ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-500 to-red-600 text-white shadow-sm">
+                            <FaArrowUp className="mr-1 text-xs" />
+                            Debit
+                        </span>
+                    ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-500 to-green-600 text-white shadow-sm">
+                            <FaArrowDown className="mr-1 text-xs" />
+                            Credit
+                        </span>
+                    )}
+                </td>
+
+                {/* Account/Ledger Column */}
+                <td className="px-3 py-2">
+                    <div className="flex items-center space-x-2">
+                        <div className="w-6 h-6 bg-gradient-to-br from-indigo-400 to-indigo-600 rounded-md flex items-center justify-center shadow-sm">
+                            <FaUniversity className="text-white text-xs" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                                {transaction.account?.name || transaction.Account?.name || 'Unknown Account'}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {transaction.ledgerHead?.name || transaction.LedgerHead?.name || 'Unknown Ledger'}
+                            </span>
+                        </div>
+                    </div>
+                </td>
+
+                {/* Payment Method Column */}
+                <td className="px-3 py-2">
+                    {transaction.cash_type === 'cash' ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-400 to-green-500 text-white shadow-sm">
+                            <FaMoneyBillWave className="mr-1 text-xs" />
+                            Cash
+                        </span>
+                    ) : transaction.cash_type === 'bank' ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-blue-400 to-blue-500 text-white shadow-sm">
+                            <FaUniversity className="mr-1 text-xs" />
+                            Bank
+                        </span>
+                    ) : transaction.cash_type === 'both' || transaction.cash_type === 'mixed' ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-400 to-purple-500 text-white shadow-sm">
+                            <FaCreditCard className="mr-1 text-xs" />
+                            Both
+                        </span>
+                    ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gray-400 text-white shadow-sm">
+                            Unknown
+                        </span>
+                    )}
+                </td>
+
+                {/* Amount Column */}
+                <td className="px-3 py-2 text-right">
+                    <div className="flex flex-col items-end">
+                        <span className={`text-sm font-bold ${getAmountStyle()}`}>
+                            {formatCurrency(transaction.amount)}
+                        </span>
+                        {(transaction.cash_type === 'both' || transaction.cash_type === 'mixed') && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
+                                <div>Cash: <span className="font-semibold">{formatCurrency(transaction.cash_amount || 0)}</span></div>
+                                <div>Bank: <span className="font-semibold">{formatCurrency(transaction.bank_amount || 0)}</span></div>
                             </div>
                         )}
                     </div>
                 </td>
-                <td className="px-3 py-2.5">
-                    <div className="text-xs">
-                        <div className="font-medium text-secondary-800 dark:text-secondary-200">{transaction.account?.name || 'Unknown'}</div>
-                        <div className="text-secondary-500 dark:text-secondary-400 text-[10px] mt-0.5">{transaction.ledgerHead?.name || 'Unknown'}</div>
-                    </div>
-                </td>
-                <td className="px-3 py-2.5 text-xs">
-                    <div className="flex items-center">
-                        {renderCashTypeWithStatus(transaction)}
-                    </div>
-                </td>
-                <td className="px-3 py-2.5">
-                    <div className={`text-xs font-medium ${getAmountStyle()}`}>
-                        {formatCurrency(transaction.amount)}
-                    </div>
-                </td>
-                <td className="px-3 py-2.5 text-right">
-                    <div className="flex items-center justify-end space-x-1">
-                        <button
-                            onClick={() => handleViewTransaction(transaction)}
-                            className="p-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-md text-blue-600 dark:text-blue-400 transition-colors"
-                            title="View transaction details"
-                        >
-                            <FaEye className="w-3 h-3" />
-                        </button>
-                        {transaction.status !== 'pending' && transaction.status !== 'cancelled' && (
-                            <button
-                                onClick={() => handleEditTransaction(transaction)}
-                                className="p-1.5 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-md text-green-600 dark:text-green-400 transition-colors"
-                                title="Edit transaction"
-                            >
-                                <FaEdit className="w-3 h-3" />
-                            </button>
+
+                {/* Status Column */}
+                <td className="px-3 py-2 text-center">
+                    <div className="flex flex-col items-center space-y-1">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm">
+                            <FaLock className="mr-1 text-xs" />
+                            Secured
+                        </span>
+                        {transaction.requires_approval && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-yellow-400 to-yellow-500 text-white shadow-sm">
+                                Pending
+                            </span>
                         )}
                     </div>
+                </td>
+
+                {/* View Action Column */}
+                <td className="px-3 py-2 text-center">
+                    <button
+                        onClick={() => handleViewTransaction(transaction)}
+                        className="w-8 h-8 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-600 dark:to-gray-700 hover:from-blue-500 hover:to-blue-600 rounded-lg text-gray-600 dark:text-gray-300 hover:text-white transition-all duration-200 shadow-sm hover:shadow-md group"
+                        title="View transaction details"
+                    >
+                        <FaEye className="w-3 h-3 mx-auto group-hover:scale-110 transition-transform duration-200" />
+                    </button>
                 </td>
             </tr>
         );
@@ -873,35 +969,102 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
             )}
 
             {/* Transactions table */}
-            <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
+            <div className="bg-white dark:bg-secondary-800 rounded-2xl shadow-lg border border-gray-100 dark:border-secondary-700 overflow-hidden backdrop-blur-sm">
                 <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-secondary-700">
-                        <thead className="bg-gray-50 dark:bg-secondary-800">
-                            <tr>
-                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Date</th>
-                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Type</th>
-                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Account / Ledger</th>
-                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Payment Method</th>
-                                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Amount</th>
-                                <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-secondary-500 dark:text-secondary-400 uppercase tracking-wider">Actions</th>
+                    <table className="min-w-full">
+                        <thead>
+                            <tr className="border-b border-gray-100 dark:border-secondary-700">
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center space-x-1">
+                                        <FaShieldAlt className="h-3 w-3 text-blue-500" />
+                                        <span>ID</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center space-x-1">
+                                        <FaCalendarAlt className="h-3 w-3 text-green-500" />
+                                        <span>Date</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center space-x-1">
+                                        <FaExchangeAlt className="h-3 w-3 text-purple-500" />
+                                        <span>Type</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center space-x-1">
+                                        <FaUniversity className="h-3 w-3 text-indigo-500" />
+                                        <span>Account</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center space-x-1">
+                                        <FaCreditCard className="h-3 w-3 text-orange-500" />
+                                        <span>Payment</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center justify-end space-x-1">
+                                        <FaMoneyBillWave className="h-3 w-3 text-green-600" />
+                                        <span>Amount</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <div className="flex items-center justify-center space-x-1">
+                                        <FaLock className="h-3 w-3 text-blue-600" />
+                                        <span>Status</span>
+                                    </div>
+                                </th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                                    <FaEye className="h-3 w-3 text-gray-500" />
+                                </th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white dark:bg-secondary-800 divide-y divide-gray-100 dark:divide-secondary-700">
+                        <tbody className="bg-white dark:bg-secondary-800 divide-y divide-gray-50 dark:divide-secondary-700/50">
                             {loading ? (
                                 <tr>
-                                    <td colSpan="6" className="px-3 py-8 text-center">
-                                        <div className="flex justify-center">
-                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
+                                    <td colSpan="8" className="px-6 py-16 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="relative">
+                                                <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-200 dark:border-gray-700"></div>
+                                                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-primary-500 absolute top-0 left-0"></div>
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="text-base font-semibold text-gray-700 dark:text-gray-300">Loading Transactions</p>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400">Fetching your transaction history...</p>
+                                            </div>
                                         </div>
-                                        <p className="mt-2 text-sm text-secondary-500 dark:text-secondary-400">Loading transactions...</p>
                                     </td>
                                 </tr>
                             ) : transactions.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="px-3 py-8 text-center">
-                                        <FaExchangeAlt className="mx-auto h-8 w-8 text-secondary-400 dark:text-secondary-600" />
-                                        <p className="mt-2 text-sm font-medium text-secondary-700 dark:text-secondary-300">No transactions found</p>
-                                        <p className="text-xs text-secondary-500 dark:text-secondary-400">Try adjusting your filters or add new transactions</p>
+                                    <td colSpan="8" className="px-6 py-16 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 rounded-full flex items-center justify-center shadow-inner">
+                                                <FaExchangeAlt className="w-6 h-6 text-gray-400 dark:text-gray-500" />
+                                            </div>
+                                            <div className="text-center max-w-sm">
+                                                <p className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-1">No Transactions Found</p>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400">There are no transactions matching your current filters. Try adjusting your search criteria or create your first transaction.</p>
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                                                <button
+                                                    onClick={() => clearFilters()}
+                                                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                                                >
+                                                    <FaTimes className="w-3 h-3 mr-2" />
+                                                    Clear Filters
+                                                </button>
+                                                <button
+                                                    onClick={() => fetchTransactions()}
+                                                    className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                                                >
+                                                    <FaSync className="w-3 h-3 mr-2" />
+                                                    Refresh
+                                                </button>
+                                            </div>
+                                        </div>
                                     </td>
                                 </tr>
                             ) : (

@@ -6,6 +6,7 @@ exports.createAccount = async (req, res) => {
     try {
         const { name, opening_balance, cash_balance, bank_balance } = req.body;
 
+        // this is the method to create a new account
         // Basic validation
         if (!name) {
             return res.status(400).json({
@@ -15,10 +16,12 @@ exports.createAccount = async (req, res) => {
         }
 
         // Parse and validate balance values
+        
         const parsedOpeningBalance = parseFloat(opening_balance || 0);
         const parsedCashBalance = parseFloat(cash_balance || 0);
         const parsedBankBalance = parseFloat(bank_balance || 0);
 
+    
         // Ensure closing balance is the sum of cash and bank balances
         const calculatedClosingBalance = parsedCashBalance + parsedBankBalance;
 
@@ -146,8 +149,8 @@ exports.updateAccount = async (req, res) => {
         const isBankBalanceModified = bank_balance !== undefined;
 
         // Parse balance values
-        const parsedCashBalance = isCashBalanceModified ? parseFloat(cash_balance) : parseFloat(account.cash_balance);
-        const parsedBankBalance = isBankBalanceModified ? parseFloat(bank_balance) : parseFloat(account.bank_balance);
+        const parsedCashBalance = isCashBalanceModified ? parseFloat(cash_balance || 0) : parseFloat(account.cash_balance || 0);
+        const parsedBankBalance = isBankBalanceModified ? parseFloat(bank_balance || 0) : parseFloat(account.bank_balance || 0);
 
         // If either cash or bank balance is modified, recalculate the closing balance
         const shouldRecalculateClosing = isCashBalanceModified || isBankBalanceModified;
@@ -286,9 +289,9 @@ exports.getAccountBalanceSummary = async (req, res) => {
         // Calculate totals from ledger heads
         const calculatedTotals = ledgerHeads.reduce(
             (totals, ledger) => {
-                totals.totalBalance += parseFloat(ledger.current_balance);
-                totals.totalCashBalance += parseFloat(ledger.cash_balance);
-                totals.totalBankBalance += parseFloat(ledger.bank_balance);
+                totals.totalBalance += parseFloat(ledger.current_balance || 0);
+                totals.totalCashBalance += parseFloat(ledger.cash_balance || 0);
+                totals.totalBankBalance += parseFloat(ledger.bank_balance || 0);
                 return totals;
             },
             { totalBalance: 0, totalCashBalance: 0, totalBankBalance: 0 }
@@ -297,8 +300,8 @@ exports.getAccountBalanceSummary = async (req, res) => {
         // Check if account balance matches calculated balance
         const accountBalance = {
             closing_balance: parseFloat(account.closing_balance),
-            cash_balance: parseFloat(account.cash_balance),
-            bank_balance: parseFloat(account.bank_balance)
+            cash_balance: parseFloat(account.cash_balance || 0),
+            bank_balance: parseFloat(account.bank_balance || 0)
         };
 
         const isBalanced = {

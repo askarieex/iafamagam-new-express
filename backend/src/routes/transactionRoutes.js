@@ -1,14 +1,26 @@
 const express = require('express');
 const router = express.Router();
 const transactionController = require('../controllers/transactionController');
+const immutableTransactionController = require('../controllers/immutableTransactionController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 // Public routes - none
 
-// Protected routes for all authenticated users
-// Create transactions
-router.post('/credit', protect, transactionController.createCredit);
-router.post('/debit', protect, transactionController.createDebit);
+// ===== NEW IMMUTABLE TRANSACTION SYSTEM =====
+// Create transactions (Immutable - No edits allowed)
+router.post('/credit', protect, immutableTransactionController.createCredit);
+router.post('/debit', protect, immutableTransactionController.createDebit);
+
+// Enhanced transaction queries
+router.get('/history', protect, immutableTransactionController.getTransactionHistory);
+router.get('/balance', protect, immutableTransactionController.getBalanceSummary);
+router.get('/integrity/verify', protect, authorize(['admin']), immutableTransactionController.verifySystemIntegrity);
+router.post('/validate-date', protect, immutableTransactionController.validateTransactionDate);
+
+// ===== LEGACY SYSTEM (Gradually being replaced) =====
+// OLD Create transactions (Will be deprecated)
+// router.post('/credit', protect, transactionController.createCredit);
+// router.post('/debit', protect, transactionController.createDebit);
 
 // Get data
 router.get('/balances/date', protect, transactionController.getBalancesForDate);
@@ -17,8 +29,14 @@ router.get('/snapshot/ledger', protect, transactionController.getLedgerSnapshotF
 router.get('/', protect, transactionController.getTransactions);
 router.get('/:id', protect, transactionController.getTransactionById);
 
-// Routes that require specific permissions
-router.put('/:id', protect, authorize(['admin', 'transactions']), transactionController.updateTransaction);
-router.delete('/:id', protect, authorize(['admin', 'transactions']), transactionController.voidTransaction);
+// ===== BLOCKED DANGEROUS ROUTES (Security Protection) =====
+// These routes are BLOCKED to prevent security risks
+router.put('/:id', protect, immutableTransactionController.blockedUpdateTransaction);
+router.delete('/:id', protect, immutableTransactionController.blockedDeleteTransaction);
+
+// ❌ OLD DANGEROUS ROUTES EXPLANATION:
+// ❌ router.put('/:id') - UPDATE/EDIT transactions (SECURITY RISK - CAN HIDE OVERDRAFTS)
+// ❌ router.delete('/:id') - DELETE/VOID transactions (SECURITY RISK - DESTROYS AUDIT TRAIL)
+// ✅ NEW APPROACH: Use correction workflow instead (maintains complete audit trail)
 
 module.exports = router; 

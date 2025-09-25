@@ -3,19 +3,24 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    // Add cash_amount column
-    await queryInterface.addColumn('transactions', 'cash_amount', {
-      type: Sequelize.DECIMAL(14, 2),
-      allowNull: true,
-      defaultValue: 0
-    });
+    // Check if columns exist before adding
+    const tableDesc = await queryInterface.describeTable('transactions');
 
-    // Add bank_amount column
-    await queryInterface.addColumn('transactions', 'bank_amount', {
-      type: Sequelize.DECIMAL(14, 2),
-      allowNull: true,
-      defaultValue: 0
-    });
+    if (!tableDesc.cash_amount) {
+      await queryInterface.addColumn('transactions', 'cash_amount', {
+        type: Sequelize.DECIMAL(14, 2),
+        allowNull: true,
+        defaultValue: 0
+      });
+    }
+
+    if (!tableDesc.bank_amount) {
+      await queryInterface.addColumn('transactions', 'bank_amount', {
+        type: Sequelize.DECIMAL(14, 2),
+        allowNull: true,
+        defaultValue: 0
+      });
+    }
   },
 
   async down(queryInterface, Sequelize) {

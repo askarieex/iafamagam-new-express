@@ -74,7 +74,7 @@ exports.createBankAccount = async (req, res) => {
             bank_name,
             acc_number,
             ifsc: ifsc || null,
-            bank_balance: bank_balance || 0.00
+            bank_balance: parseFloat(bank_balance || 0)
         });
 
         return res.status(201).json({
@@ -116,7 +116,7 @@ exports.updateBankAccount = async (req, res) => {
         if (bank_name !== undefined) updatedData.bank_name = bank_name;
         if (acc_number !== undefined) updatedData.acc_number = acc_number;
         if (ifsc !== undefined) updatedData.ifsc = ifsc;
-        if (bank_balance !== undefined) updatedData.bank_balance = bank_balance;
+        if (bank_balance !== undefined) updatedData.bank_balance = parseFloat(bank_balance || 0);
 
         // Perform update
         await bankAccount.update(updatedData);

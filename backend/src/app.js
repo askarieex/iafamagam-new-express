@@ -24,7 +24,6 @@ const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
 const reconciliationRoutes = require('./routes/reconciliationRoutes');
-const dependencyRoutes = require('./routes/dependencyRoutes');
 const db = require('./models');
 // ... other route imports ...
 
@@ -40,8 +39,7 @@ app.use('/api/donors', protect, donorRoutes);
 app.use('/api/booklets', protect, bookletRoutes);
 app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
-app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
-app.use('/api/ledger-heads', protect, dependencyRoutes); 
+app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes); 
 
 const PORT = process.env.PORT || 3001;
 db.sequelize.sync().then(() => {

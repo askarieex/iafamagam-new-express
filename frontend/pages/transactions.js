@@ -9,7 +9,7 @@ import {
     FaEdit
 } from 'react-icons/fa';
 import TransactionsList from '../components/transactions/TransactionsList';
-import CreditTransactionForm from '../components/transactions/CreditTransactionForm';
+import ImmutableCreditTransactionForm from '../components/transactions/ImmutableCreditTransactionForm';
 import DebitTransactionForm from '../components/transactions/DebitTransactionForm';
 import TransactionDetails from '../components/transactions/TransactionDetails';
 
@@ -57,7 +57,7 @@ export default function TransactionsPage() {
     if (activeTab === 'debit') pageTitle = 'New Debit Transaction';
     if (activeTab === 'edit-credit') pageTitle = 'Edit Credit Transaction';
     if (activeTab === 'edit-debit') pageTitle = 'Edit Debit Transaction';
-    if (activeTab === 'details') pageTitle = `Transaction Details ${selectedTransaction ? `#${selectedTransaction.id.substring(0, 8)}` : ''}`;
+    if (activeTab === 'details') pageTitle = `Transaction Details ${selectedTransaction ? `#${selectedTransaction.id?.toString().substring(0, 8) || selectedTransaction.id}` : ''}`;
 
     return (
         <div className="w-full space-y-5 animate-fadeIn">
@@ -110,7 +110,7 @@ export default function TransactionsPage() {
 
                 {activeTab === 'credit' && (
                     <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 p-4 sm:p-6">
-                        <CreditTransactionForm
+                        <ImmutableCreditTransactionForm
                             onSuccess={handleTransactionSuccess}
                             onCancel={handleBackToList}
                         />
