@@ -29,6 +29,7 @@ import API_CONFIG from '../config';
 export default function MonthlyReports() {
     // State management
     const [accounts, setAccounts] = useState([]);
+    const [selectedAccountId, setSelectedAccountId] = useState('');
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [loading, setLoading] = useState(false);
@@ -39,8 +40,14 @@ export default function MonthlyReports() {
     // Fetch accounts on component mount
     useEffect(() => {
         fetchAccounts();
-        fetchAvailableMonths();
     }, []);
+
+    // Fetch available months when account changes
+    useEffect(() => {
+        if (selectedAccountId) {
+            fetchAvailableMonths();
+        }
+    }, [selectedAccountId]);
 
     /**
      * Fetch all accounts
@@ -51,7 +58,10 @@ export default function MonthlyReports() {
 
             if (response.data.success) {
                 setAccounts(response.data.data);
-                // No need to auto-select account since we use combined reports
+                // Auto-select first account
+                if (response.data.data.length > 0 && !selectedAccountId) {
+                    setSelectedAccountId(response.data.data[0].id);
+                }
             } else {
                 setError(response.data.message || 'Failed to fetch accounts');
             }
@@ -62,13 +72,14 @@ export default function MonthlyReports() {
     };
 
     /**
-     * Fetch available months with transaction data (all accounts combined)
+     * Fetch available months with transaction data
      */
     const fetchAvailableMonths = async () => {
+        if (!selectedAccountId) return;
+
         try {
-            // Use account ID 1 as default to get all available months
             const response = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/transactions/available-months/1`
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/reports/available-months/${selectedAccountId}`
             );
 
             if (response.data.success) {
@@ -80,11 +91,11 @@ export default function MonthlyReports() {
     };
 
     /**
-     * Generate monthly report (all accounts combined)
+     * Generate monthly report
      */
     const generateMonthlyReport = async (regenerate = false) => {
-        if (!selectedYear || !selectedMonth) {
-            toast.error('Please select year and month');
+        if (!selectedAccountId || !selectedYear || !selectedMonth) {
+            toast.error('Please select account, year, and month');
             return;
         }
 
@@ -92,17 +103,15 @@ export default function MonthlyReports() {
         setError(null);
 
         try {
-            console.log(`🔄 Generating combined report for ${selectedYear}-${selectedMonth}`);
+            console.log(`🔄 Generating report for ${selectedYear}-${selectedMonth}, Account: ${selectedAccountId}`);
 
-            // Use account ID 1 as default - the backend will combine all accounts
             const response = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/transactions/monthly-report/${selectedYear}/${selectedMonth}/1`,
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/reports/monthly/${selectedYear}/${selectedMonth}/${selectedAccountId}`,
                 {
                     params: {
                         regenerate: regenerate,
                         include_transactions: false,
-                        save_results: true,
-                        all_accounts: true
+                        save_results: true
                     }
                 }
             );
@@ -162,8 +171,25 @@ export default function MonthlyReports() {
 
                 {/* Controls Section */}
                 <div className="p-6 bg-gray-50 dark:bg-secondary-700">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Note: No account selection - shows combined report for all accounts */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        {/* Account Selection */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Account
+                            </label>
+                            <select
+                                value={selectedAccountId}
+                                onChange={(e) => setSelectedAccountId(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-secondary-800 dark:border-secondary-600 dark:text-white"
+                            >
+                                <option value="">Select Account</option>
+                                {accounts.map(account => (
+                                    <option key={account.id} value={account.id}>
+                                        {account.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
                         {/* Year Selection */}
                         <div>
@@ -212,9 +238,9 @@ export default function MonthlyReports() {
                         <div className="flex flex-col justify-end">
                             <button
                                 onClick={() => generateMonthlyReport()}
-                                disabled={loading}
+                                disabled={loading || !selectedAccountId}
                                 className={`w-full px-4 py-2 rounded-lg font-medium flex items-center justify-center ${
-                                    loading
+                                    loading || !selectedAccountId
                                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         : 'bg-blue-600 text-white hover:bg-blue-700'
                                 } transition-colors duration-200`}
@@ -301,7 +327,7 @@ function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport }
                         FINANCIAL REPORT FOR THE MONTH OF {reportData.month_name.toUpperCase()}
                     </h2>
                     <h3 className="text-sm font-medium opacity-90">
-                        {reportData.account_display_name || 'ALL ACCOUNTS COMBINED'}
+                        GENERAL ACCOUNT
                     </h3>
                 </div>
 
@@ -378,194 +404,94 @@ function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport }
                 </div>
             </div>
 
-            {/* Traditional Balance Sheet Layout - Account-wise Format */}
+            {/* Ledger Heads Report Table */}
             <div className="bg-white dark:bg-secondary-800 rounded-xl shadow-sm border border-gray-100 dark:border-secondary-700 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full">
+                        <thead className="bg-gray-50 dark:bg-secondary-700">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-secondary-600">
+                                    Ledger Head
+                                </th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-secondary-600">
+                                    O.B
+                                </th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-secondary-600">
+                                    Recep. During the Month
+                                </th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-secondary-600">
+                                    Amount
+                                </th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    Balance
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-secondary-800 divide-y divide-gray-200 dark:divide-secondary-600">
+                            {/* Credit Heads */}
+                            {reportData.credit_heads?.map((ledger, index) => (
+                                <tr key={`credit-${index}`} className="hover:bg-gray-50 dark:hover:bg-secondary-700">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border-r border-gray-200 dark:border-secondary-600">
+                                        {ledger.ledger_head.display_name || ledger.ledger_head.name}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.opening_balance)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.total_credits)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.total_debits)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center">
+                                        {formatCurrency(ledger.closing_balance)}
+                                    </td>
+                                </tr>
+                            )) || []}
 
-                {/* Account-wise Tables */}
-                {reportData.account_groups?.map((accountGroup, groupIndex) => (
-                    <div key={`account-${groupIndex}`} className="mb-4">
-                        {/* Account Header */}
-                        <div className="bg-blue-600 text-white px-4 py-3 text-center font-bold text-lg">
-                            {accountGroup.account.name.toUpperCase()}
-                        </div>
+                            {/* Credit Totals */}
+                            {reportData.credit_heads?.length > 0 && (
+                                <tr className="bg-black text-white font-bold">
+                                    <td className="px-6 py-3 text-sm font-bold border-r border-gray-600">
+                                        Total (T1)
+                                    </td>
+                                    <td className="px-6 py-3 text-sm text-center border-r border-gray-600">
+                                        {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.opening_balance, 0))}
+                                    </td>
+                                    <td className="px-6 py-3 text-sm text-center border-r border-gray-600">
+                                        {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.total_credits, 0))}
+                                    </td>
+                                    <td className="px-6 py-3 text-sm text-center border-r border-gray-600">
+                                        {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.total_debits, 0))}
+                                    </td>
+                                    <td className="px-6 py-3 text-sm text-center">
+                                        {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.closing_balance, 0))}
+                                    </td>
+                                </tr>
+                            )}
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full border-collapse">
-                                <thead className="bg-gray-100 dark:bg-secondary-700">
-                                    <tr>
-                                        {/* Credit Side Headers */}
-                                        <th className="px-3 py-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Ledger Head
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            O.B
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Recep. During the Month
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            G. Total
-                                        </th>
-                                        {/* Debit Side Headers */}
-                                        <th className="px-3 py-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Ledger Head
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Amount
-                                        </th>
-                                        {/* Balance and Cash columns for credit side */}
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Balance
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Cash in Bank
-                                        </th>
-                                        <th className="px-3 py-2 text-center text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300">
-                                            Cash in Hand
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white dark:bg-secondary-800">
-                                    {/* Get max rows needed for this account */}
-                                    {(() => {
-                                        const creditHeads = accountGroup.credit_heads || [];
-                                        const debitHeads = accountGroup.debit_heads || [];
-                                        const maxRows = Math.max(creditHeads.length, debitHeads.length);
-                                        const rows = [];
-
-                                        for (let i = 0; i < maxRows; i++) {
-                                            const creditHead = creditHeads[i];
-                                            const debitHead = debitHeads[i];
-
-                                            rows.push(
-                                                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-secondary-700">
-                                                    {/* Credit Side: Ledger Head, O.B, Receipts, G.Total */}
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white border border-gray-300">
-                                                        {creditHead?.ledger_head.name || ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.opening_balance) : ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.total_credits) : ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.opening_balance + creditHead.total_credits) : ''}
-                                                    </td>
-                                                    {/* Debit Side: Ledger Head, Amount */}
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white border border-gray-300">
-                                                        {debitHead?.ledger_head.name || ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {debitHead ? formatCurrency(debitHead.closing_balance) : ''}
-                                                    </td>
-                                                    {/* Balance and Cash columns */}
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.closing_balance) : ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.bank_amount || 0) : ''}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
-                                                        {creditHead ? formatCurrency(creditHead.cash_amount || 0) : ''}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        }
-
-                                        return rows;
-                                    })()}
-
-                                    {/* Account Total Row */}
-                                    <tr className="bg-gray-200 dark:bg-secondary-600 font-bold">
-                                        <td className="px-3 py-2 text-sm font-bold text-gray-900 dark:text-white border border-gray-300">
-                                            {accountGroup.account.name} Total Income
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + l.opening_balance, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + l.total_credits, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + l.opening_balance + l.total_credits, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm font-bold text-gray-900 dark:text-white border border-gray-300">
-                                            {accountGroup.account.name} Total Expenses
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.debit_heads.reduce((sum, l) => sum + l.closing_balance, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + l.closing_balance, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + (l.bank_amount || 0), 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-gray-300">
-                                            {formatCurrency(accountGroup.credit_heads.reduce((sum, l) => sum + (l.cash_amount || 0), 0))}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                ))}
-
-                {/* Grand Totals Section */}
-                {reportData.credit_heads?.length > 0 && (
-                    <div className="bg-black text-white">
-                        <div className="overflow-x-auto">
-                            <table className="w-full border-collapse">
-                                <tbody>
-                                    <tr className="font-bold">
-                                        <td className="px-3 py-2 text-sm font-bold border border-white">
-                                            Grand Total Income (All Accounts)
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.opening_balance, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.total_credits, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.opening_balance + l.total_credits, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm font-bold border border-white">
-                                            Grand Total Expenses (All Accounts)
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {reportData.debit_heads ? formatCurrency(reportData.debit_heads.reduce((sum, l) => sum + l.closing_balance, 0)) : '₹0.00'}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + l.closing_balance, 0))}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {reportData.credit_heads ? formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + (l.bank_amount || 0), 0)) : '₹0.00'}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-center border border-white">
-                                            {reportData.credit_heads ? formatCurrency(reportData.credit_heads.reduce((sum, l) => sum + (l.cash_amount || 0), 0)) : '₹0.00'}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {/* Grand Total Summary */}
-                <div className="bg-black text-white px-4 py-3 text-center">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div className="text-sm font-bold">
-                            Total Income: {formatCurrency(reportData.totals.total_credits)}
-                        </div>
-                        <div className="text-sm font-bold">
-                            Total Expenses: {formatCurrency(reportData.totals.total_debits)}
-                        </div>
-                    </div>
-                    <div className="mt-2 text-lg font-bold">
-                        Net Balance: {formatCurrency(reportData.totals.closing_balance)}
-                    </div>
+                            {/* Debit Heads */}
+                            {reportData.debit_heads?.map((ledger, index) => (
+                                <tr key={`debit-${index}`} className="hover:bg-gray-50 dark:hover:bg-secondary-700">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border-r border-gray-200 dark:border-secondary-600">
+                                        {ledger.ledger_head.display_name || ledger.ledger_head.name}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.opening_balance)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.total_credits)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center border-r border-gray-200 dark:border-secondary-600">
+                                        {formatCurrency(ledger.total_debits)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white text-center">
+                                        {formatCurrency(ledger.closing_balance)}
+                                    </td>
+                                </tr>
+                            )) || []}
+                        </tbody>
+                    </table>
                 </div>
 
                 {/* Report Footer */}

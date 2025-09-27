@@ -11,6 +11,7 @@ const bookletRoutes = require('./routes/bookletRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const chequeRoutes = require('./routes/chequeRoutes');
 const reconciliationRoutes = require('./routes/reconciliationRoutes');
+const monthlyReportRoutes = require('./routes/monthlyReportRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -59,6 +60,7 @@ app.use('/api/booklets', protect, bookletRoutes);
 app.use('/api/transactions', protect, transactionRoutes);
 app.use('/api/cheques', protect, chequeRoutes);
 app.use('/api/reconciliation', protect, authorize('admin'), reconciliationRoutes);
+app.use('/api/reports', protect, monthlyReportRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

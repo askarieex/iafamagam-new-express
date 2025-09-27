@@ -636,7 +636,7 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
                             <FaUniversity className="mr-1 text-xs" />
                             Bank
                         </span>
-                    ) : transaction.cash_type === 'both' || transaction.cash_type === 'mixed' ? (
+                    ) : transaction.cash_type === 'both' || transaction.cash_type === 'mixed' || transaction.cash_type === 'multiple' ? (
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-400 to-purple-500 text-white shadow-sm">
                             <FaCreditCard className="mr-1 text-xs" />
                             Both
@@ -654,10 +654,12 @@ export default function TransactionsList({ onViewTransaction, onEditTransaction 
                         <span className={`text-sm font-bold ${getAmountStyle()}`}>
                             {formatCurrency(transaction.amount)}
                         </span>
-                        {(transaction.cash_type === 'both' || transaction.cash_type === 'mixed') && (
+                        {((transaction.cash_type === 'both' || transaction.cash_type === 'mixed' || transaction.cash_type === 'multiple') ||
+                          (transaction.cash_amount !== undefined && transaction.bank_amount !== undefined &&
+                           (parseFloat(transaction.cash_amount || 0) > 0 || parseFloat(transaction.bank_amount || 0) > 0))) && (
                             <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
-                                <div>Cash: <span className="font-semibold">{formatCurrency(transaction.cash_amount || 0)}</span></div>
-                                <div>Bank: <span className="font-semibold">{formatCurrency(transaction.bank_amount || 0)}</span></div>
+                                <div>Cash: <span className="font-semibold">{formatCurrency(parseFloat(transaction.cash_amount || 0))}</span></div>
+                                <div>Bank: <span className="font-semibold">{formatCurrency(parseFloat(transaction.bank_amount || 0))}</span></div>
                             </div>
                         )}
                     </div>

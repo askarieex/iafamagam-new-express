@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
     FaPlus, FaEdit, FaTrash, FaSync, FaSearch, FaUniversity,
-    FaCreditCard, FaReceipt, FaCheckCircle, FaTimesCircle
+    FaCreditCard, FaReceipt, FaCheckCircle, FaTimesCircle,
+    FaMoneyBillWave, FaLandmark, FaWallet, FaArrowUp, FaArrowDown,
+    FaChartLine, FaChartPie
 } from 'react-icons/fa';
 import API_CONFIG from '../config';
 import { toast } from 'react-hot-toast';
@@ -266,79 +268,209 @@ export default function ManageLedger() {
                                 </button>
                             </div>
                         ) : (
-                            Object.entries(groupedByAccount()).map(([accountName, heads]) => (
-                                <div key={accountName} className="mb-8 last:mb-0">
-                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                                        <FaUniversity className="mr-2 text-blue-600" />
-                                        {accountName}
-                                        <span className="ml-2 bg-blue-100 text-blue-700 text-sm px-3 py-1 rounded-full">
-                                            {heads.length} heads
-                                        </span>
-                                    </h3>
+                            Object.entries(groupedByAccount()).map(([accountName, heads]) => {
+                                const creditHeads = heads.filter(h => h.head_type === 'credit');
+                                const debitHeads = heads.filter(h => h.head_type === 'debit');
 
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr className="bg-gray-50">
-                                                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Name</th>
-                                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Type</th>
-                                                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Balance</th>
-                                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {heads.map(head => (
-                                                    <tr
-                                                        key={head.id}
-                                                        className="border-t border-gray-200 hover:bg-gray-50 transition-colors"
-                                                    >
-                                                        <td className="px-4 py-4">
-                                                            <div className="flex items-center">
-                                                                {head.head_type === 'credit' ? (
-                                                                    <FaCreditCard className="mr-2 text-green-600" />
-                                                                ) : (
-                                                                    <FaReceipt className="mr-2 text-red-600" />
-                                                                )}
-                                                                <span className="font-medium text-gray-900">{head.name}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-4 py-4 text-center">
-                                                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                                                                head.head_type === 'credit'
-                                                                    ? 'bg-green-100 text-green-800'
-                                                                    : 'bg-red-100 text-red-800'
-                                                            }`}>
-                                                                {head.head_type === 'credit' ? 'Credit (Income)' : 'Debit (Expense)'}
+                                return (
+                                    <div key={accountName} className="mb-12 last:mb-0">
+                                        {/* Account Header */}
+                                        <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
+                                            <h3 className="text-xl font-bold flex items-center">
+                                                <FaUniversity className="mr-3" />
+                                                {accountName}
+                                                <span className="ml-auto bg-blue-500 text-white text-sm px-3 py-1 rounded-full">
+                                                    {heads.length} Ledger Heads
+                                                </span>
+                                            </h3>
+                                        </div>
+
+                                        {/* Combined Table Layout */}
+                                        <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl overflow-hidden">
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 min-h-[400px]">
+
+                                                {/* Credit Heads Table */}
+                                                <div className="border-r border-gray-200 lg:border-r lg:border-gray-200">
+                                                    <div className="bg-green-50 border-b border-green-200 px-6 py-3">
+                                                        <h4 className="font-semibold text-green-800 flex items-center">
+                                                            <FaArrowDown className="mr-2 text-green-600" />
+                                                            Credit Heads (Income)
+                                                            <span className="ml-auto bg-green-200 text-green-800 text-xs px-2 py-1 rounded-full">
+                                                                {creditHeads.length}
                                                             </span>
-                                                        </td>
-                                                        <td className="px-4 py-4 text-right font-mono">
-                                                            {formatCurrency(head.current_balance)}
-                                                        </td>
-                                                        <td className="px-4 py-4">
-                                                            <div className="flex items-center justify-center space-x-2">
-                                                                <button
-                                                                    onClick={() => handleEdit(head)}
-                                                                    className="p-2 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
-                                                                    title="Edit ledger head"
-                                                                >
-                                                                    <FaEdit size={14} />
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleDelete(head.id)}
-                                                                    className="p-2 text-red-600 hover:bg-red-100 rounded-full transition-colors"
-                                                                    title="Delete ledger head"
-                                                                >
-                                                                    <FaTrash size={14} />
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                                        </h4>
+                                                    </div>
+
+                                                    {/* Credit Table */}
+                                                    {creditHeads.length === 0 ? (
+                                                        <div className="text-center py-12 text-green-600">
+                                                            <FaCreditCard className="text-4xl mx-auto mb-3 opacity-40" />
+                                                            <p className="text-sm">No credit heads found</p>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full">
+                                                                <thead className="bg-green-25">
+                                                                    <tr className="text-xs border-b border-green-100">
+                                                                        <th className="px-4 py-2 text-left font-medium text-green-800">Name</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-green-800">Cash</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-green-800">Bank</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-green-800">Total</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-green-800">Actions</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {creditHeads.map((head, index) => (
+                                                                        <tr key={head.id} className={`border-b border-green-50 hover:bg-green-25 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-green-25/30'}`}>
+                                                                            <td className="px-4 py-3">
+                                                                                <div className="flex items-center">
+                                                                                    <FaCreditCard className="mr-2 text-green-600 text-sm" />
+                                                                                    <span className="font-medium text-gray-900 text-sm">{head.name}</span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaWallet className="text-yellow-600 mb-1" size={12} />
+                                                                                    <span className="font-mono text-xs font-semibold text-yellow-900">
+                                                                                        {formatCurrency(head.cash_balance || 0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaLandmark className="text-blue-600 mb-1" size={12} />
+                                                                                    <span className="font-mono text-xs font-semibold text-blue-900">
+                                                                                        {formatCurrency(head.bank_balance || 0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaChartLine className="text-green-700 mb-1" size={12} />
+                                                                                    <span className="font-mono text-sm font-bold text-green-900">
+                                                                                        {formatCurrency(head.current_balance || 0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3">
+                                                                                <div className="flex items-center justify-center space-x-1">
+                                                                                    <button
+                                                                                        onClick={() => handleEdit(head)}
+                                                                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                                                                        title="Edit"
+                                                                                    >
+                                                                                        <FaEdit size={10} />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={() => handleDelete(head.id)}
+                                                                                        className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
+                                                                                        title="Delete"
+                                                                                    >
+                                                                                        <FaTrash size={10} />
+                                                                                    </button>
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Debit Heads Table */}
+                                                <div>
+                                                    <div className="bg-red-50 border-b border-red-200 px-6 py-3">
+                                                        <h4 className="font-semibold text-red-800 flex items-center">
+                                                            <FaArrowUp className="mr-2 text-red-600" />
+                                                            Debit Heads (Expenses)
+                                                            <span className="ml-auto bg-red-200 text-red-800 text-xs px-2 py-1 rounded-full">
+                                                                {debitHeads.length}
+                                                            </span>
+                                                        </h4>
+                                                    </div>
+
+                                                    {/* Debit Table */}
+                                                    {debitHeads.length === 0 ? (
+                                                        <div className="text-center py-12 text-red-600">
+                                                            <FaReceipt className="text-4xl mx-auto mb-3 opacity-40" />
+                                                            <p className="text-sm">No debit heads found</p>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full">
+                                                                <thead className="bg-red-25">
+                                                                    <tr className="text-xs border-b border-red-100">
+                                                                        <th className="px-4 py-2 text-left font-medium text-red-800">Name</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-red-800">Cash</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-red-800">Bank</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-red-800">Total</th>
+                                                                        <th className="px-2 py-2 text-center font-medium text-red-800">Actions</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {debitHeads.map((head, index) => (
+                                                                        <tr key={head.id} className={`border-b border-red-50 hover:bg-red-25 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-red-25/30'}`}>
+                                                                            <td className="px-4 py-3">
+                                                                                <div className="flex items-center">
+                                                                                    <FaReceipt className="mr-2 text-red-600 text-sm" />
+                                                                                    <span className="font-medium text-gray-900 text-sm">{head.name}</span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaWallet className="text-yellow-600 mb-1" size={12} />
+                                                                                    <span className="font-mono text-xs font-semibold text-yellow-900">
+                                                                                        {formatCurrency(head.cash_balance || 0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaLandmark className="text-blue-600 mb-1" size={12} />
+                                                                                    <span className="font-mono text-xs font-semibold text-blue-900">
+                                                                                        {formatCurrency(head.bank_balance || 0)}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3 text-center">
+                                                                                <div className="flex flex-col items-center">
+                                                                                    <FaChartPie className="text-red-700 mb-1" size={12} />
+                                                                                    <span className="font-mono text-sm font-bold text-red-900">
+                                                                                        {formatCurrency(Math.abs(head.current_balance || 0))}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-2 py-3">
+                                                                                <div className="flex items-center justify-center space-x-1">
+                                                                                    <button
+                                                                                        onClick={() => handleEdit(head)}
+                                                                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                                                                        title="Edit"
+                                                                                    >
+                                                                                        <FaEdit size={10} />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={() => handleDelete(head.id)}
+                                                                                        className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
+                                                                                        title="Delete"
+                                                                                    >
+                                                                                        <FaTrash size={10} />
+                                                                                    </button>
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>

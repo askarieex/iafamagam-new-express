@@ -9,6 +9,9 @@ import {
 } from 'react-icons/fa';
 
 export default function CreditTransactionForm({ onSuccess, onCancel }) {
+    // 🚨 CACHE BUSTER VERSION: v2.7.1 - TIMESTAMP: 1737897600000
+    console.log('🚨 CreditTransactionForm LOADED - VERSION 2.7.1 - CACHE BUSTER ACTIVE');
+
     // Form state
     const [formData, setFormData] = useState({
         account_id: '',
@@ -33,6 +36,8 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
     const [booklets, setBooklets] = useState([]);
     const [selectedBooklet, setSelectedBooklet] = useState(null); // Track selected booklet for page selection
     const [donors, setDonors] = useState([]);
+    const [ledgerBalance, setLedgerBalance] = useState(null);
+    const [loadingBalance, setLoadingBalance] = useState(false);
 
     // Use global axios instance with auth interceptors
     const api = axios;
@@ -45,6 +50,56 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
             fetchDonors()
         ]);
     }, []);
+
+    // Fetch ledger balance
+    const fetchLedgerBalance = async (accountId, ledgerHeadId) => {
+        if (!accountId || !ledgerHeadId) return;
+
+        try {
+            setLoadingBalance(true);
+            console.log(`🔄 Fetching balance for ledger head ${ledgerHeadId} in account ${accountId}`);
+
+            // Try the live balance API first
+            const response = await api.get(`${API_CONFIG.BASE_URL}/api/transactions/balance/live?account_id=${accountId}`);
+
+            if (response.data.success) {
+                console.log('✅ Balance API response:', response.data.data);
+
+                // Find the specific ledger head balance (API returns "balance_summary" not "ledger_heads")
+                const ledgerBalance = response.data.data.balance_summary?.find(
+                    head => head.ledger_head_id === parseInt(ledgerHeadId) || head.ledger_head?.id === parseInt(ledgerHeadId)
+                );
+
+                if (ledgerBalance) {
+                    console.log('✅ Found ledger balance:', ledgerBalance);
+                    setLedgerBalance(ledgerBalance);
+                } else {
+                    // If not found in live balance, try to get from ledger heads directly
+                    console.log('⚠️ Ledger not found in live balance, trying direct approach...');
+
+                    const ledgerResponse = await api.get(`${API_CONFIG.BASE_URL}/api/ledger-heads`);
+                    if (ledgerResponse.data.success) {
+                        const ledger = ledgerResponse.data.data.find(l => l.id === parseInt(ledgerHeadId));
+                        if (ledger) {
+                            setLedgerBalance({
+                                ledger_head: ledger,
+                                current_balance: ledger.current_balance || 0,
+                                total_credits: 0,
+                                total_debits: 0
+                            });
+                        } else {
+                            setLedgerBalance(null);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error fetching ledger balance:', error);
+            setLedgerBalance(null);
+        } finally {
+            setLoadingBalance(false);
+        }
+    };
 
     // Load ledger heads when account changes
     useEffect(() => {
@@ -207,11 +262,16 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
     };
 
     // Handle form changes
-    const handleInputChange = (field, value) => {
+    const handleInputChange = async (field, value) => {
         setFormData(prev => ({
             ...prev,
             [field]: value
         }));
+
+        // Fetch balance when ledger head changes
+        if (field === 'ledger_head_id' && value && formData.account_id) {
+            await fetchLedgerBalance(formData.account_id, value);
+        }
     };
 
     const handleAmountChange = (mainAmount) => {
@@ -252,8 +312,20 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
             } else if (method === 'bank') {
                 updatedData.cash_amount = '';
                 updatedData.bank_amount = currentAmount > 0 ? currentAmount.toString() : prev.bank_amount || '';
+            } else if (method === 'both') {
+                // For 'both', initialize with empty values or preserve existing split
+                if (!prev.cash_amount && !prev.bank_amount && currentAmount > 0) {
+                    // If switching to 'both' and no previous split exists, suggest an even split
+                    const halfAmount = (currentAmount / 2).toString();
+                    updatedData.cash_amount = halfAmount;
+                    updatedData.bank_amount = halfAmount;
+                } else {
+                    // Keep existing values or set to empty if they don't exist
+                    updatedData.cash_amount = prev.cash_amount || '';
+                    updatedData.bank_amount = prev.bank_amount || '';
+                }
+                console.log(`🔄 Switching to 'both' payment - Cash: "${updatedData.cash_amount}", Bank: "${updatedData.bank_amount}"`);
             }
-            // For 'both', keep current values or reset to empty if switching from single method
 
             return updatedData;
         });
@@ -307,21 +379,40 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
 
         try {
             console.log('🔄 Submitting immutable credit transaction...');
+            console.log('📝 INITIAL Form data:', formData);
+            console.log('🔍 Cash type value:', formData.cash_type);
+            console.log('🔍 Cash amount value:', formData.cash_amount);
+            console.log('🔍 Bank amount value:', formData.bank_amount);
 
             // Prepare final data with correct amount distribution
             const submitData = { ...formData };
             const mainAmount = parseFloat(formData.amount || 0);
 
+            console.log(`💰 Main amount: ${mainAmount}, Cash type: "${formData.cash_type}"`);
+            console.log(`📊 Form cash values - cash_amount: "${formData.cash_amount}", bank_amount: "${formData.bank_amount}"`);
+
             if (formData.cash_type === 'cash') {
                 submitData.cash_amount = mainAmount;
                 submitData.bank_amount = 0;
+                console.log(`💵 CASH payment - Setting cash: ${submitData.cash_amount}, bank: ${submitData.bank_amount}`);
             } else if (formData.cash_type === 'bank') {
                 submitData.cash_amount = 0;
                 submitData.bank_amount = mainAmount;
-            }
-            // For 'both', use the entered values
+                console.log(`🏦 BANK payment - Setting cash: ${submitData.cash_amount}, bank: ${submitData.bank_amount}`);
+            } else if (formData.cash_type === 'both') {
+                // CACHE BUSTER: 1737897600000
+                // For 'both', ensure we have proper numeric values
+                console.log(`🔄 BOTH payment type detected - Processing split... TIMESTAMP: ${Date.now()}`);
+                alert(`🚨 CACHE BUSTER ALERT 🚨 BOTH payment type detected! Cash: ${formData.cash_amount}, Bank: ${formData.bank_amount} - TIME: ${new Date().toLocaleTimeString()}`);
+                submitData.cash_amount = parseFloat(formData.cash_amount || 0);
+                submitData.bank_amount = parseFloat(formData.bank_amount || 0);
+                console.log(`🔍 BOTH payment type - Cash: ${submitData.cash_amount}, Bank: ${submitData.bank_amount}`);
 
-            console.log('📊 Final submit data:', submitData);
+                const total = submitData.cash_amount + submitData.bank_amount;
+                console.log(`✅ Split verification - Total: ${total}, Expected: ${mainAmount}, Valid: ${Math.abs(total - mainAmount) < 0.01}`);
+            }
+
+            console.log('📊 FINAL submit data before API call:', submitData);
 
             // Add authorization header
             const token = localStorage.getItem('token');
@@ -618,6 +709,50 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
                                     </option>
                                 ))}
                             </select>
+
+                            {/* Opening Balance Display */}
+                            {formData.ledger_head_id && (
+                                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <FaInfoCircle className="text-blue-500 mr-2" />
+                                            <span className="text-sm font-medium text-blue-800">Opening Balance</span>
+                                        </div>
+                                        {loadingBalance ? (
+                                            <div className="text-sm text-blue-600">Loading...</div>
+                                        ) : ledgerBalance ? (
+                                            <div className="text-right">
+                                                <div className="text-lg font-bold text-blue-800">
+                                                    ₹{ledgerBalance.current_balance?.toFixed(2) || '0.00'}
+                                                </div>
+                                                <div className="text-xs text-blue-600">
+                                                    {ledgerBalance.ledger_head?.name}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm text-blue-600">No balance data</div>
+                                        )}
+                                    </div>
+                                    {ledgerBalance && (
+                                        <div className="mt-2 pt-2 border-t border-blue-200">
+                                            <div className="grid grid-cols-3 gap-2 text-xs text-blue-700">
+                                                <div>
+                                                    <span className="font-medium">Cash: </span>
+                                                    ₹{(ledgerBalance.ledger_head?.cash_balance || 0).toFixed(2)}
+                                                </div>
+                                                <div>
+                                                    <span className="font-medium">Bank: </span>
+                                                    ₹{(ledgerBalance.ledger_head?.bank_balance || 0).toFixed(2)}
+                                                </div>
+                                                <div>
+                                                    <span className="font-medium">Total: </span>
+                                                    ₹{((ledgerBalance.ledger_head?.cash_balance || 0) + (ledgerBalance.ledger_head?.bank_balance || 0)).toFixed(2)}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex justify-center space-x-4 mt-8">

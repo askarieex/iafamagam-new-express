@@ -1,5 +1,6 @@
 const immutableTransactionService = require('../services/immutableTransactionService');
 const hashChainService = require('../services/hashChainService');
+const realTimeBalanceService = require('../services/realTimeBalanceService');
 
 class ImmutableTransactionController {
 
@@ -10,6 +11,8 @@ class ImmutableTransactionController {
     createCredit = async (req, res) => {
         try {
             console.log('🔄 Processing immutable credit transaction request...');
+            console.log('📨 RECEIVED DATA FROM FRONTEND:', JSON.stringify(req.body, null, 2));
+            console.log('💰 Amounts in request - cash_amount:', req.body.cash_amount, 'bank_amount:', req.body.bank_amount, 'cash_type:', req.body.cash_type);
 
             // Extract user context from request
             const userContext = {
@@ -26,6 +29,14 @@ class ImmutableTransactionController {
             );
 
             console.log('✅ Credit transaction created successfully:', result.transaction.uuid);
+
+            // Trigger real-time balance update
+            try {
+                await realTimeBalanceService.onTransactionAdded(result.transaction);
+            } catch (balanceError) {
+                console.error('⚠️ Real-time balance update failed:', balanceError);
+                // Don't fail the transaction, but log the error
+            }
 
             return res.status(201).json({
                 success: true,
@@ -89,6 +100,14 @@ class ImmutableTransactionController {
             );
 
             console.log('✅ Debit transaction created successfully:', result.transaction.uuid);
+
+            // Trigger real-time balance update
+            try {
+                await realTimeBalanceService.onTransactionAdded(result.transaction);
+            } catch (balanceError) {
+                console.error('⚠️ Real-time balance update failed:', balanceError);
+                // Don't fail the transaction, but log the error
+            }
 
             return res.status(201).json({
                 success: true,
@@ -166,6 +185,44 @@ class ImmutableTransactionController {
             return res.status(500).json({
                 success: false,
                 message: 'Failed to fetch transaction history',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get live balance summary with real-time calculations
+     * @route GET /api/transactions/balance/live
+     */
+    async getLiveBalanceSummary(req, res) {
+        try {
+            const { account_id } = req.query;
+
+            if (!account_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Account ID is required'
+                });
+            }
+
+            const liveBalance = await realTimeBalanceService.getLiveBalanceSummary(parseInt(account_id));
+
+            return res.status(200).json({
+                success: true,
+                data: liveBalance,
+                system_info: {
+                    real_time_calculation: true,
+                    auto_balance_flow: true,
+                    month_continuity: true,
+                    generated_at: new Date()
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Error fetching live balance summary:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to fetch live balance summary',
                 error: error.message
             });
         }

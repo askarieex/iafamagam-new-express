@@ -1,5 +1,6 @@
 const express = require('express');
 const userController = require('../controllers/userController');
+const balanceRecalculationController = require('../controllers/balanceRecalculationController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -15,5 +16,11 @@ router.post('/users', userController.createUser);
 router.put('/users/:id', userController.updateUser);
 router.patch('/users/:id/permissions', userController.updatePermissions);
 router.delete('/users/:id', userController.deleteUser);
+
+// Balance recalculation routes
+router.post('/recalculate-balances', balanceRecalculationController.recalculateAllBalances);
+router.post('/recalculate-balances/:accountId', balanceRecalculationController.recalculateAccountBalances);
+router.get('/validate-balances', balanceRecalculationController.validateBalances);
+router.post('/recalculate-balance/:ledgerHeadId', balanceRecalculationController.recalculateLedgerHeadBalance);
 
 module.exports = router; 

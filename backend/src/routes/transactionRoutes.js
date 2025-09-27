@@ -14,8 +14,14 @@ router.post('/debit', protect, immutableTransactionController.createDebit);
 // Enhanced transaction queries
 router.get('/history', protect, immutableTransactionController.getTransactionHistory);
 router.get('/balance', protect, immutableTransactionController.getBalanceSummary);
+router.get('/balance/live', protect, immutableTransactionController.getLiveBalanceSummary);
 router.get('/integrity/verify', protect, authorize(['admin']), immutableTransactionController.verifySystemIntegrity);
 router.post('/validate-date', protect, immutableTransactionController.validateTransactionDate);
+
+// Monthly report endpoints (temporary placement)
+const simpleMonthlyController = require('../controllers/simpleMonthlyReportController');
+router.get('/monthly-report/:year/:month/:accountId', protect, simpleMonthlyController.generateMonthlyReport);
+router.get('/available-months/:accountId', protect, simpleMonthlyController.getAvailableMonths);
 
 // ===== LEGACY SYSTEM (Gradually being replaced) =====
 // OLD Create transactions (Will be deprecated)

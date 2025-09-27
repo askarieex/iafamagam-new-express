@@ -1095,191 +1095,141 @@ class TransactionService {
         if (filters.account_id) where.account_id = filters.account_id;
         if (filters.ledger_head_id) where.ledger_head_id = filters.ledger_head_id;
         if (filters.donor_id) where.donor_id = filters.donor_id;
-        if (filters.tx_type) where.tx_type = filters.tx_type;
-
-        // Handle status and cash_type together for proper tab filtering
-        if (filters.status) {
-            // For pending tab - ONLY show pending cheques
-            if (filters.status === 'pending') {
-                where.status = 'pending';
-                where.cash_type = 'cheque';
-            }
-            // For cancelled tab - ONLY show cancelled cheques
-            else if (filters.status === 'cancelled') {
-                where.status = 'cancelled';
-                where.cash_type = 'cheque';
-            }
-            // For completed tab - show completed transactions OR cleared cheques
-            else if (filters.status === 'completed') {
-                where[Op.or] = [
-                    // Regular transactions
-                    {
-                        [Op.and]: [
-                            { status: 'completed' },
-                            { cash_type: { [Op.ne]: 'cheque' } }
-                        ]
-                    },
-                    // Cleared cheques
-                    {
-                        [Op.and]: [
-                            { status: 'completed' },
-                            { cash_type: 'cheque' }
-                        ]
-                    }
-                ];
-            } else {
-                where.status = filters.status;
-            }
-        }
-
-        // If separate cash_type filter provided (and not in a status-specific tab)
-        if (filters.cash_type && !filters.status) {
-            where.cash_type = filters.cash_type;
-        }
 
         // Date range filter
         if (filters.start_date && filters.end_date) {
-            where.tx_date = {
+            where.transaction_date = {
                 [Op.between]: [filters.start_date, filters.end_date]
             };
         } else if (filters.start_date) {
-            where.tx_date = { [Op.gte]: filters.start_date };
+            where.transaction_date = { [Op.gte]: filters.start_date };
         } else if (filters.end_date) {
-            where.tx_date = { [Op.lte]: filters.end_date };
+            where.transaction_date = { [Op.lte]: filters.end_date };
         }
 
         console.log('Transaction filter query:', JSON.stringify(where, null, 2));
 
-        // Get transactions with count
-        const { count, rows } = await db.Transaction.findAndCountAll({
-            where,
+        // Get ALL transaction log entries (not filtering by log_sequence)
+        const allLogEntries = await db.TransactionLog.findAll({
+            where: where,
             include: [
-                { model: db.TransactionItem, as: 'items' },
-                { model: db.Donor, as: 'donor' },
-                { model: db.Booklet, as: 'booklet' },
                 { model: db.LedgerHead, as: 'ledgerHead' },
                 { model: db.Account, as: 'account' },
-                { model: db.Cheque, as: 'cheque' }
+                { model: db.Donor, as: 'donor' },
+                { model: db.Booklet, as: 'booklet' }
             ],
-            order: [['tx_date', 'DESC'], ['created_at', 'DESC']],
-            limit,
-            offset
+            order: [['transaction_date', 'DESC'], ['created_at', 'DESC']]
         });
 
-        // COUNTS FOR THE TAB HEADERS
-        // These should be consistently calculated regardless of current tab
+        // Group by transaction_uuid to identify double-entry vs single-entry transactions
+        const transactionGroups = {};
+        allLogEntries.forEach(entry => {
+            const uuid = entry.transaction_uuid;
+            if (!transactionGroups[uuid]) {
+                transactionGroups[uuid] = [];
+            }
+            transactionGroups[uuid].push(entry);
+        });
 
-        // Pending cheques: cash_type=cheque, status=pending
-        const pendingChequesWhere = {
-            cash_type: 'cheque',
-            status: 'pending'
-        };
+        // Process each transaction group and decide what to show
+        const businessTransactions = [];
+        for (const [uuid, logEntries] of Object.entries(transactionGroups)) {
+            if (logEntries.length === 1) {
+                // Single entry = Credit transaction (money coming in)
+                const entry = logEntries[0];
+                businessTransactions.push({
+                    id: entry.transaction_uuid,
+                    account_id: entry.account_id,
+                    ledger_head_id: entry.ledger_head_id,
+                    donor_id: entry.donor_id,
+                    booklet_id: entry.booklet_id,
+                    receipt_no: entry.receipt_number,
+                    amount: entry.amount,
+                    cash_amount: entry.cash_amount,
+                    bank_amount: entry.bank_amount,
+                    tx_type: 'credit',
+                    cash_type: entry.cash_type,
+                    tx_date: entry.transaction_date,
+                    description: entry.description,
+                    status: 'completed',
+                    created_at: entry.created_at,
+                    updated_at: entry.created_at,
+                    ledgerHead: entry.ledgerHead,
+                    account: entry.account,
+                    donor: entry.donor,
+                    booklet: entry.booklet
+                });
+            } else if (logEntries.length === 2) {
+                // Double entry = Debit transaction (money going out)
+                // Show ONLY the debit head entry (what money is spent ON)
+                const debitHeadEntry = logEntries.find(entry =>
+                    entry.ledgerHead && entry.ledgerHead.head_type === 'debit'
+                );
 
-        // Cancelled cheques: cash_type=cheque, status=cancelled
-        const cancelledChequesWhere = {
-            cash_type: 'cheque',
-            status: 'cancelled'
-        };
+                const creditHeadEntry = logEntries.find(entry =>
+                    entry.ledgerHead && entry.ledgerHead.head_type === 'credit'
+                );
 
-        // Apply common filters to these queries too
-        if (filters.account_id) {
-            pendingChequesWhere.account_id = filters.account_id;
-            cancelledChequesWhere.account_id = filters.account_id;
+                if (debitHeadEntry && creditHeadEntry) {
+                    // Clean up the description by removing the "Transfer to:/from:" prefix
+                    let cleanDescription = debitHeadEntry.description.replace(/^Transfer (to|from):[^-]*-\s*/, '');
+
+                    businessTransactions.push({
+                        id: debitHeadEntry.transaction_uuid,
+                        account_id: debitHeadEntry.account_id,
+                        ledger_head_id: debitHeadEntry.ledger_head_id,
+                        donor_id: debitHeadEntry.donor_id,
+                        booklet_id: debitHeadEntry.booklet_id,
+                        receipt_no: debitHeadEntry.receipt_number,
+                        amount: debitHeadEntry.amount,
+                        cash_amount: debitHeadEntry.cash_amount,
+                        bank_amount: debitHeadEntry.bank_amount,
+                        tx_type: 'debit',
+                        cash_type: debitHeadEntry.cash_type,
+                        tx_date: debitHeadEntry.transaction_date,
+                        description: cleanDescription,
+                        status: 'completed',
+                        created_at: debitHeadEntry.created_at,
+                        updated_at: debitHeadEntry.created_at,
+                        ledgerHead: debitHeadEntry.ledgerHead,
+                        account: debitHeadEntry.account,
+                        donor: debitHeadEntry.donor,
+                        booklet: debitHeadEntry.booklet,
+                        // Add source information for context
+                        sourceHead: creditHeadEntry.ledgerHead
+                    });
+                }
+            }
         }
 
-        if (filters.ledger_head_id) {
-            pendingChequesWhere.ledger_head_id = filters.ledger_head_id;
-            cancelledChequesWhere.ledger_head_id = filters.ledger_head_id;
-        }
-
+        // Apply tx_type filter after grouping
+        let filteredTransactions = businessTransactions;
         if (filters.tx_type) {
-            pendingChequesWhere.tx_type = filters.tx_type;
-            cancelledChequesWhere.tx_type = filters.tx_type;
+            filteredTransactions = businessTransactions.filter(tx => tx.tx_type === filters.tx_type);
         }
 
-        if (filters.start_date && filters.end_date) {
-            pendingChequesWhere.tx_date = { [Op.between]: [filters.start_date, filters.end_date] };
-            cancelledChequesWhere.tx_date = { [Op.between]: [filters.start_date, filters.end_date] };
-        } else if (filters.start_date) {
-            pendingChequesWhere.tx_date = { [Op.gte]: filters.start_date };
-            cancelledChequesWhere.tx_date = { [Op.gte]: filters.start_date };
-        } else if (filters.end_date) {
-            pendingChequesWhere.tx_date = { [Op.lte]: filters.end_date };
-            cancelledChequesWhere.tx_date = { [Op.lte]: filters.end_date };
-        }
+        // Sort by date
+        filteredTransactions.sort((a, b) => new Date(b.tx_date) - new Date(a.tx_date));
 
-        // Get pending cheques count and sum
-        const pendingCheques = await db.Transaction.findAll({
-            where: pendingChequesWhere,
-            attributes: [
-                [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
-                [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
-                ['tx_type', 'type']
-            ],
-            group: ['tx_type'],
-            raw: true
-        });
+        // Apply pagination
+        const paginatedTransactions = filteredTransactions.slice(offset, offset + limit);
 
-        // Get cancelled cheques count and sum
-        const cancelledCheques = await db.Transaction.findAll({
-            where: cancelledChequesWhere,
-            attributes: [
-                [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
-                [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
-                ['tx_type', 'type']
-            ],
-            group: ['tx_type'],
-            raw: true
-        });
-
-        // Calculate total pending statistics
-        let pendingCount = 0;
-        let pendingTotal = 0;
-        let pendingDebitCount = 0;
-        let pendingCreditCount = 0;
-
-        pendingCheques.forEach(group => {
-            pendingCount += parseInt(group.count) || 0;
-            pendingTotal += parseFloat(group.total) || 0;
-
-            if (group.type === 'debit') {
-                pendingDebitCount += parseInt(group.count) || 0;
-            } else if (group.type === 'credit') {
-                pendingCreditCount += parseInt(group.count) || 0;
-            }
-        });
-
-        // Calculate total cancelled statistics
-        let cancelledCount = 0;
-        let cancelledTotal = 0;
-        let cancelledDebitCount = 0;
-        let cancelledCreditCount = 0;
-
-        cancelledCheques.forEach(group => {
-            cancelledCount += parseInt(group.count) || 0;
-            cancelledTotal += parseFloat(group.total) || 0;
-
-            if (group.type === 'debit') {
-                cancelledDebitCount += parseInt(group.count) || 0;
-            } else if (group.type === 'credit') {
-                cancelledCreditCount += parseInt(group.count) || 0;
-            }
-        });
+        const totalCount = filteredTransactions.length;
 
         return {
-            total: count,
+            total: totalCount,
             page,
             limit,
-            totalPages: Math.ceil(count / limit),
-            transactions: rows,
-            pendingCount,
-            pendingTotal,
-            cancelledCount,
-            cancelledTotal,
-            pendingDebitCount,
-            pendingCreditCount,
-            cancelledDebitCount,
-            cancelledCreditCount
+            totalPages: Math.ceil(totalCount / limit),
+            transactions: paginatedTransactions,
+            pendingCount: 0, // No pending transactions in log-based system
+            pendingTotal: 0,
+            cancelledCount: 0, // No cancelled transactions in log-based system
+            cancelledTotal: 0,
+            pendingDebitCount: 0,
+            pendingCreditCount: 0,
+            cancelledDebitCount: 0,
+            cancelledCreditCount: 0
         };
     }
 

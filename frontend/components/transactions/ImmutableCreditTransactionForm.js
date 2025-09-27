@@ -9,6 +9,9 @@ import {
 } from 'react-icons/fa';
 
 export default function ImmutableCreditTransactionForm({ onSuccess, onCancel }) {
+    // 🚨 IMMUTABLE CACHE BUSTER VERSION: v3.1 - TIMESTAMP: 1737897700000
+    console.log('🚨 ImmutableCreditTransactionForm LOADED - VERSION 3.1 - MIXED PAYMENT FIXED');
+
     // Form state
     const [formData, setFormData] = useState({
         account_id: '',
@@ -262,9 +265,34 @@ export default function ImmutableCreditTransactionForm({ onSuccess, onCancel }) 
         setLoading(true);
 
         try {
-            console.log('🔄 Submitting immutable credit transaction...');
+            console.log('🔄 Submitting immutable credit transaction... CACHE BUSTER v3.1');
+            console.log('📝 Original form data:', formData);
+            console.log('🔍 Cash type:', formData.cash_type);
 
-            const response = await api.post('/api/transactions/credit', formData);
+            // Process cash/bank amounts based on payment type
+            const submitData = { ...formData };
+            const mainAmount = parseFloat(formData.amount || 0);
+
+            if (formData.cash_type === 'cash') {
+                submitData.cash_amount = mainAmount;
+                submitData.bank_amount = 0;
+                console.log(`💵 CASH payment - Setting cash: ${submitData.cash_amount}, bank: ${submitData.bank_amount}`);
+            } else if (formData.cash_type === 'bank') {
+                submitData.cash_amount = 0;
+                submitData.bank_amount = mainAmount;
+                console.log(`🏦 BANK payment - Setting cash: ${submitData.cash_amount}, bank: ${submitData.bank_amount}`);
+            } else if (formData.cash_type === 'mixed') {
+                // CACHE BUSTER ALERT: Mixed payment processing
+                console.log(`🔄 MIXED payment type detected - Processing split... TIMESTAMP: ${Date.now()}`);
+                alert(`🚨 MIXED PAYMENT DETECTED! Cash: ${formData.cash_amount}, Bank: ${formData.bank_amount} - TIME: ${new Date().toLocaleTimeString()}`);
+                submitData.cash_amount = parseFloat(formData.cash_amount || 0);
+                submitData.bank_amount = parseFloat(formData.bank_amount || 0);
+                console.log(`🔍 MIXED payment - Cash: ${submitData.cash_amount}, Bank: ${submitData.bank_amount}`);
+            }
+
+            console.log('📊 FINAL submit data before API call:', submitData);
+
+            const response = await api.post('/api/transactions/credit', submitData);
 
             if (response.data?.success) {
                 console.log('✅ Transaction created:', response.data.data);

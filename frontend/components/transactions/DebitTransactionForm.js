@@ -112,11 +112,28 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
     const fetchLedgerHeads = async (accountId) => {
         try {
-            const response = await api.get(`${API_CONFIG.API_PREFIX}/ledger-heads`, {
-                params: { account_id: accountId }
-            });
+            // Get all ledger heads since they contain the correct current_balance, cash_balance, and bank_balance
+            const response = await api.get(`${API_CONFIG.API_PREFIX}/ledger-heads`);
             if (response.data.success) {
-                setLedgerHeads(response.data.data || []);
+                const allLedgers = response.data.data || [];
+
+                // Filter ledgers for the selected account if needed
+                const ledgers = accountId ?
+                    allLedgers.filter(ledger => ledger.account_id == accountId) :
+                    allLedgers;
+
+                setLedgerHeads(ledgers);
+
+                // Set balances with cash and bank details from ALL ledgers
+                const balanceMap = {};
+                allLedgers.forEach(ledger => {
+                    balanceMap[ledger.id] = {
+                        current_balance: parseFloat(ledger.current_balance || 0),
+                        cash_balance: parseFloat(ledger.cash_balance || 0),
+                        bank_balance: parseFloat(ledger.bank_balance || 0)
+                    };
+                });
+                setBalances(balanceMap);
             }
         } catch (error) {
             console.error('Error fetching ledger heads:', error);
@@ -125,19 +142,18 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
     const fetchBalancesForDate = async (accountId, date) => {
         try {
-            const response = await api.get(`${API_CONFIG.API_PREFIX}/transactions/balances-for-date`, {
-                params: { account_id: accountId, date: date }
+            // Get balances directly from ledger heads since they now have correct balances
+            const balanceMap = {};
+            ledgerHeads.forEach(ledger => {
+                balanceMap[ledger.id] = {
+                    current_balance: parseFloat(ledger.current_balance || 0),
+                    cash_balance: parseFloat(ledger.cash_balance || 0),
+                    bank_balance: parseFloat(ledger.bank_balance || 0)
+                };
             });
-
-            if (response.data.success) {
-                const balanceMap = {};
-                response.data.data.forEach(ledger => {
-                    balanceMap[ledger.id] = ledger.current_balance || 0;
-                });
-                setBalances(balanceMap);
-            }
+            setBalances(balanceMap);
         } catch (error) {
-            console.error('Error fetching balances:', error);
+            console.error('Error setting balances:', error);
         }
     };
 
@@ -185,10 +201,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             }));
             setLedgerHeads([]);
             setBalances({});
-            fetchLedgerHeads(value);
-            if (formData.tx_date) {
-                fetchBalancesForDate(value, formData.tx_date);
-            }
+            fetchLedgerHeads(value); // This will now also set balances
         }
 
         // Clear amount fields when cash_type changes
@@ -215,12 +228,14 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         if (!formData.amount || parseFloat(formData.amount) <= 0) newErrors.amount = 'Valid amount is required';
 
         // Validate cash type specific fields
+        const updatedFormData = { ...formData };
+
         if (formData.cash_type === 'cash') {
-            formData.cash_amount = formData.amount;
-            formData.bank_amount = '';
+            updatedFormData.cash_amount = formData.amount;
+            updatedFormData.bank_amount = '0';
         } else if (formData.cash_type === 'bank') {
-            formData.bank_amount = formData.amount;
-            formData.cash_amount = '';
+            updatedFormData.bank_amount = formData.amount;
+            updatedFormData.cash_amount = '0';
         } else if (formData.cash_type === 'multiple') {
             if (!formData.cash_amount || parseFloat(formData.cash_amount) < 0) {
                 newErrors.cash_amount = 'Cash amount is required for multiple payment type';
@@ -240,16 +255,47 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
             if (!formData.bank_name) newErrors.bank_name = 'Bank name is required';
             if (!formData.issue_date) newErrors.issue_date = 'Issue date is required';
             if (!formData.due_date) newErrors.due_date = 'Due date is required';
-            formData.bank_amount = formData.amount;
-            formData.cash_amount = '';
+            updatedFormData.bank_amount = formData.amount;
+            updatedFormData.cash_amount = '0';
         }
 
-        // Check source ledger balance
+        // Update formData with calculated amounts
+        setFormData(updatedFormData);
+
+        // Check source ledger balance with proper cash/bank breakdown validation
         if (formData.source_ledger_head_id && formData.amount) {
-            const sourceBalance = balances[formData.source_ledger_head_id] || 0;
+            const sourceBalanceData = balances[formData.source_ledger_head_id] || {
+                current_balance: 0,
+                cash_balance: 0,
+                bank_balance: 0
+            };
+
             const transferAmount = parseFloat(formData.amount);
-            if (transferAmount > sourceBalance) {
-                newErrors.amount = `Insufficient balance. Available: ₹${sourceBalance}`;
+
+            // Check total balance first
+            if (transferAmount > sourceBalanceData.current_balance) {
+                newErrors.amount = `Insufficient total balance. Available: ₹${sourceBalanceData.current_balance.toFixed(2)}`;
+            } else {
+                // Check cash/bank specific balances based on payment method
+                if (formData.cash_type === 'cash') {
+                    if (transferAmount > sourceBalanceData.cash_balance) {
+                        newErrors.amount = `Insufficient cash balance. Available: ₹${sourceBalanceData.cash_balance.toFixed(2)}`;
+                    }
+                } else if (formData.cash_type === 'bank') {
+                    if (transferAmount > sourceBalanceData.bank_balance) {
+                        newErrors.amount = `Insufficient bank balance. Available: ₹${sourceBalanceData.bank_balance.toFixed(2)}`;
+                    }
+                } else if (formData.cash_type === 'multiple') {
+                    const cashAmount = parseFloat(formData.cash_amount || 0);
+                    const bankAmount = parseFloat(formData.bank_amount || 0);
+
+                    if (cashAmount > sourceBalanceData.cash_balance) {
+                        newErrors.cash_amount = `Insufficient cash balance. Available: ₹${sourceBalanceData.cash_balance.toFixed(2)}`;
+                    }
+                    if (bankAmount > sourceBalanceData.bank_balance) {
+                        newErrors.bank_amount = `Insufficient bank balance. Available: ₹${sourceBalanceData.bank_balance.toFixed(2)}`;
+                    }
+                }
             }
         }
 
@@ -269,14 +315,26 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
         try {
             // Prepare submission data
-            const submitData = {
-                ...formData,
-                sources: [{
-                    ledger_head_id: formData.source_ledger_head_id,
-                    amount: parseFloat(formData.amount),
-                    side: '-'
-                }]
-            };
+            // Prepare submission data with proper cash/bank amounts
+            const submitData = { ...formData };
+            const totalAmount = parseFloat(formData.amount);
+
+            // Ensure cash and bank amounts are properly set based on payment method
+            if (formData.cash_type === 'cash') {
+                submitData.cash_amount = totalAmount;
+                submitData.bank_amount = 0;
+            } else if (formData.cash_type === 'bank') {
+                submitData.cash_amount = 0;
+                submitData.bank_amount = totalAmount;
+            } else if (formData.cash_type === 'multiple') {
+                submitData.cash_amount = parseFloat(formData.cash_amount || 0);
+                submitData.bank_amount = parseFloat(formData.bank_amount || 0);
+            } else if (formData.cash_type === 'cheque') {
+                submitData.cash_amount = 0;
+                submitData.bank_amount = totalAmount;
+            }
+
+            console.log('Submitting debit transaction:', submitData);
 
             const endpoint = isEditing
                 ? `${API_CONFIG.API_PREFIX}/transactions/${transaction.id}`
@@ -390,11 +448,16 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             required
                         >
                             <option value="">Select source ledger head</option>
-                            {ledgerHeads.map((ledger) => (
-                                <option key={ledger.id} value={ledger.id}>
-                                    {ledger.name} (₹{balances[ledger.id] || 0})
-                                </option>
-                            ))}
+                            {ledgerHeads
+                                .filter(ledger => ledger.head_type === 'credit') // Only show credit heads (income sources)
+                                .map((ledger) => {
+                                    const balance = balances[ledger.id] || { current_balance: 0, cash_balance: 0, bank_balance: 0 };
+                                    return (
+                                        <option key={ledger.id} value={ledger.id}>
+                                            {ledger.name} - Total: ₹{balance.current_balance.toFixed(2)} (Cash: ₹{balance.cash_balance.toFixed(2)}, Bank: ₹{balance.bank_balance.toFixed(2)})
+                                        </option>
+                                    );
+                                })}
                         </select>
                         {errors.source_ledger_head_id && (
                             <p className="text-red-500 text-sm mt-1">{errors.source_ledger_head_id}</p>
@@ -413,7 +476,9 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                             required
                         >
                             <option value="">Select destination ledger head</option>
-                            {ledgerHeads.map((ledger) => (
+                            {ledgerHeads
+                                .filter(ledger => ledger.head_type === 'debit') // Only show debit heads (expense destinations)
+                                .map((ledger) => (
                                 <option key={ledger.id} value={ledger.id}>
                                     {ledger.name}
                                 </option>
@@ -424,6 +489,38 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         )}
                     </div>
                 </div>
+
+                {/* Balance Display for Selected Source */}
+                {formData.source_ledger_head_id && balances[formData.source_ledger_head_id] && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h3 className="text-sm font-medium text-blue-800 mb-3">
+                            <FaInfoCircle className="inline mr-2" />
+                            Available Balance in {ledgerHeads.find(l => l.id == formData.source_ledger_head_id)?.name}
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-green-600">
+                                    ₹{balances[formData.source_ledger_head_id].current_balance.toFixed(2)}
+                                </div>
+                                <div className="text-sm text-gray-600">Total Balance</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-lg font-semibold text-blue-600">
+                                    <FaMoneyBillWave className="inline mr-1" />
+                                    ₹{balances[formData.source_ledger_head_id].cash_balance.toFixed(2)}
+                                </div>
+                                <div className="text-sm text-gray-600">Cash Available</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-lg font-semibold text-purple-600">
+                                    <FaUniversity className="inline mr-1" />
+                                    ₹{balances[formData.source_ledger_head_id].bank_balance.toFixed(2)}
+                                </div>
+                                <div className="text-sm text-gray-600">Bank Available</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Payment Method */}
                 <div>

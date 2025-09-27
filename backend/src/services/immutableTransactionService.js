@@ -76,7 +76,7 @@ class ImmutableTransactionService {
      * @returns {Object} Created transaction result
      */
     async createDebitTransaction(transactionData, userContext) {
-        const transaction = await db.sequelize.transaction();
+        const dbTransaction = await db.sequelize.transaction();
 
         try {
             console.log('🔄 Creating immutable debit transaction...');
@@ -84,32 +84,47 @@ class ImmutableTransactionService {
             // STEP 1: Validate and prepare data
             const validatedData = await this.validateAndPrepareTransaction(transactionData, 'debit');
 
-            // STEP 2: Check available balance (prevent overdrafts)
-            await this.validateSufficientBalance(validatedData);
+            // STEP 2: Extract source ledger head (where money comes from)
+            const sourceLedgerHeadId = transactionData.source_ledger_head_id;
 
-            // STEP 3: Check date restrictions and approval requirements
-            const dateValidation = await this.validateTransactionDate(validatedData.transaction_date, userContext);
-
-            // STEP 4: Create transaction log entry
-            const logEntry = await this.createTransactionLogEntry(
-                validatedData,
-                userContext,
-                dateValidation,
-                transaction
-            );
-
-            // STEP 5: Update ledger head balances
-            await this.updateLedgerHeadBalance(logEntry, transaction);
-
-            // STEP 6: Handle receipt booklet if specified
-            if (logEntry.booklet_id && logEntry.receipt_number) {
-                await this.handleReceiptUsage(logEntry.booklet_id, logEntry.receipt_number, transaction);
+            if (!sourceLedgerHeadId) {
+                throw new Error('Source ledger head is required for debit transactions');
             }
 
-            // STEP 7: Create audit trail
-            await this.createAuditTrail(logEntry, userContext, transaction);
+            // STEP 3: Check available balance in source ledger (prevent overdrafts)
+            await this.validateSufficientBalance({
+                ...validatedData,
+                ledger_head_id: sourceLedgerHeadId // Check source balance, not destination
+            });
 
-            await transaction.commit();
+            // STEP 4: Check date restrictions and approval requirements
+            const dateValidation = await this.validateTransactionDate(validatedData.transaction_date, userContext);
+
+            // STEP 5: Create transaction log entry for the expense (debit head)
+            const logEntry = await this.createTransactionLogEntry({
+                ...validatedData,
+                ledger_head_id: validatedData.ledger_head_id, // Destination (expense) ledger
+                tx_type: 'debit',
+                description: `${validatedData.description}`,
+                source_ledger_head_id: sourceLedgerHeadId // Track source for balance deduction
+            }, userContext, dateValidation, dbTransaction);
+
+            // STEP 6: Update balances - ONLY the source credit head loses money, destination debit head tracks the expense
+            // 6a. Decrease source ledger balance (money going out from credit head)
+            await this.updateSourceLedgerBalance(logEntry, sourceLedgerHeadId, dbTransaction);
+
+            // 6b. Update destination expense ledger (record the expense) - this increases the debit head balance
+            await this.updateLedgerHeadBalance(logEntry, dbTransaction);
+
+            // STEP 7: Handle receipt booklet if specified
+            if (logEntry.booklet_id && logEntry.receipt_number) {
+                await this.handleReceiptUsage(logEntry.booklet_id, logEntry.receipt_number, dbTransaction);
+            }
+
+            // STEP 8: Create audit trail
+            await this.createAuditTrail(logEntry, userContext, dbTransaction);
+
+            await dbTransaction.commit();
 
             console.log('✅ Immutable debit transaction created:', logEntry.transaction_uuid);
 
@@ -124,13 +139,13 @@ class ImmutableTransactionService {
                     approval_level: logEntry.approval_level
                 },
                 message: logEntry.requires_approval
-                    ? 'Transaction created and pending approval'
-                    : 'Transaction created successfully',
+                    ? 'Debit transaction created and pending approval'
+                    : 'Debit transaction created successfully',
                 warning: 'This transaction is now PERMANENTLY recorded and cannot be modified. Only corrections through approval workflow are possible.'
             };
 
         } catch (error) {
-            await transaction.rollback();
+            await dbTransaction.rollback();
             console.error('❌ Failed to create debit transaction:', error);
             throw error;
         }
@@ -176,12 +191,37 @@ class ImmutableTransactionService {
         // Set transaction date (default to today if not provided)
         const transactionDate = data.transaction_date || new Date().toISOString().split('T')[0];
 
+        // Validate and set cash/bank amounts based on payment method
+        let cashAmount = 0;
+        let bankAmount = 0;
+
+        if (data.cash_type === 'cash') {
+            cashAmount = amount;
+            bankAmount = 0;
+        } else if (['bank', 'upi', 'card', 'netbank', 'cheque'].includes(data.cash_type)) {
+            cashAmount = 0;
+            bankAmount = amount;
+        } else if (data.cash_type === 'both' || data.cash_type === 'multiple' || data.cash_type === 'mixed') {
+            cashAmount = parseFloat(data.cash_amount || 0);
+            bankAmount = parseFloat(data.bank_amount || 0);
+            console.log(`🔄 MIXED/BOTH/MULTIPLE payment detected: cash_type="${data.cash_type}", cashAmount=${cashAmount}, bankAmount=${bankAmount}`);
+
+            // Validate that cash + bank equals total amount
+            if (Math.abs((cashAmount + bankAmount) - amount) > 0.01) {
+                throw new Error(`Cash (₹${cashAmount}) + Bank (₹${bankAmount}) = ₹${cashAmount + bankAmount} does not equal total amount ₹${amount}`);
+            }
+        } else {
+            // Default to bank for unknown payment types
+            cashAmount = 0;
+            bankAmount = amount;
+        }
+
         return {
             account_id: parseInt(data.account_id),
             ledger_head_id: parseInt(data.ledger_head_id),
             amount: amount,
-            cash_amount: parseFloat(data.cash_amount || amount),
-            bank_amount: parseFloat(data.bank_amount || 0),
+            cash_amount: cashAmount,
+            bank_amount: bankAmount,
             tx_type: txType,
             cash_type: data.cash_type,
             transaction_date: transactionDate,
@@ -292,9 +332,11 @@ class ImmutableTransactionService {
      * Validate sufficient balance for debit transactions
      */
     async validateSufficientBalance(transactionData) {
+        // For debit transactions, check the source ledger head balance
+        const sourceLedgerHeadId = transactionData.source_ledger_head_id || transactionData.ledger_head_id;
         const currentBalance = await this.calculateCurrentBalance(
             transactionData.account_id,
-            transactionData.ledger_head_id
+            sourceLedgerHeadId
         );
 
         if (currentBalance < transactionData.amount) {
@@ -303,21 +345,63 @@ class ImmutableTransactionService {
     }
 
     /**
+     * Get ledger head name by ID
+     */
+    async getLedgerHeadName(ledgerHeadId) {
+        try {
+            const ledgerHead = await db.LedgerHead.findByPk(ledgerHeadId);
+            return ledgerHead ? ledgerHead.name : `Unknown Ledger (${ledgerHeadId})`;
+        } catch (error) {
+            return `Ledger ${ledgerHeadId}`;
+        }
+    }
+
+    /**
      * Create immutable transaction log entry
      */
     async createTransactionLogEntry(transactionData, userContext, dateValidation, transaction) {
-        // Generate UUID for this transaction
-        const transactionUuid = uuidv4();
+        // Use provided transaction_uuid or generate a new one
+        const transactionUuid = transactionData.transaction_uuid || uuidv4();
+
+        // Calculate log_sequence for this transaction UUID
+        let logSequence = 1;
+        if (transactionData.transaction_uuid) {
+            // If we have a shared UUID, get the next sequence number
+            const existingEntries = await db.TransactionLog.findAll({
+                where: { transaction_uuid: transactionData.transaction_uuid },
+                transaction
+            });
+            logSequence = existingEntries.length + 1;
+        }
 
         // Get previous hash for chain
         const previousHash = await hashChainService.getLastTransactionHash(transactionData.account_id) || '';
 
+        // Clean up invalid booklet/receipt data that would cause foreign key errors
+        const cleanedData = { ...transactionData };
+
+        // If booklet_id is provided, verify it exists in the database
+        if (cleanedData.booklet_id) {
+            try {
+                const bookletExists = await db.Booklet.findByPk(cleanedData.booklet_id, { transaction });
+                if (!bookletExists) {
+                    console.warn(`Booklet ID ${cleanedData.booklet_id} not found, removing from transaction data`);
+                    delete cleanedData.booklet_id;
+                    delete cleanedData.receipt_number;
+                }
+            } catch (error) {
+                console.warn(`Error checking booklet ID ${cleanedData.booklet_id}, removing from transaction data:`, error.message);
+                delete cleanedData.booklet_id;
+                delete cleanedData.receipt_number;
+            }
+        }
+
         // Prepare log entry data
         const logData = {
             transaction_uuid: transactionUuid,
-            log_sequence: 1,
+            log_sequence: logSequence,
             action_type: 'CREATE',
-            ...transactionData,
+            ...cleanedData,
             created_at: new Date(),
             created_by: userContext.userId,
             client_ip: userContext.ipAddress,
@@ -339,6 +423,72 @@ class ImmutableTransactionService {
     }
 
     /**
+     * Update source ledger head balance (for debit transactions)
+     * This decreases the balance of the source ledger (where money comes from)
+     */
+    async updateSourceLedgerBalance(logEntry, sourceLedgerHeadId, transaction) {
+        try {
+            console.log(`🔄 Updating SOURCE ledger head balance for ledger_head_id: ${sourceLedgerHeadId}, amount: ${logEntry.amount}`);
+
+            // Get the source ledger head
+            const sourceLedgerHead = await db.LedgerHead.findByPk(sourceLedgerHeadId, { transaction });
+
+            if (!sourceLedgerHead) {
+                throw new Error(`Source ledger head not found: ${sourceLedgerHeadId}`);
+            }
+
+            // Calculate cash and bank portions for deduction
+            const amountToDeduct = parseFloat(logEntry.amount || 0);
+            let cashToDeduct = 0;
+            let bankToDeduct = 0;
+
+            if (logEntry.cash_type === 'cash') {
+                cashToDeduct = amountToDeduct;
+                bankToDeduct = 0;
+            } else if (['bank', 'upi', 'card', 'netbank', 'cheque'].includes(logEntry.cash_type)) {
+                cashToDeduct = 0;
+                bankToDeduct = amountToDeduct;
+            } else if (logEntry.cash_type === 'both' || logEntry.cash_type === 'multiple') {
+                cashToDeduct = parseFloat(logEntry.cash_amount || 0);
+                bankToDeduct = parseFloat(logEntry.bank_amount || 0);
+            } else {
+                // Default to bank for unknown payment types
+                cashToDeduct = 0;
+                bankToDeduct = amountToDeduct;
+            }
+
+            // Calculate new balances
+            const newCurrentBalance = parseFloat(sourceLedgerHead.current_balance || 0) - amountToDeduct;
+            const newCashBalance = parseFloat(sourceLedgerHead.cash_balance || 0) - cashToDeduct;
+            const newBankBalance = parseFloat(sourceLedgerHead.bank_balance || 0) - bankToDeduct;
+
+            // Validate sufficient balance
+            if (newCurrentBalance < -0.01) {
+                throw new Error(`Insufficient total balance in ${sourceLedgerHead.name}. Required: ₹${amountToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.current_balance}`);
+            }
+            if (newCashBalance < -0.01 && cashToDeduct > 0) {
+                throw new Error(`Insufficient cash balance in ${sourceLedgerHead.name}. Required: ₹${cashToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.cash_balance}`);
+            }
+            if (newBankBalance < -0.01 && bankToDeduct > 0) {
+                throw new Error(`Insufficient bank balance in ${sourceLedgerHead.name}. Required: ₹${bankToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.bank_balance}`);
+            }
+
+            // Update the source ledger head
+            await sourceLedgerHead.update({
+                current_balance: Math.round(newCurrentBalance * 100) / 100,
+                cash_balance: Math.round(newCashBalance * 100) / 100,
+                bank_balance: Math.round(newBankBalance * 100) / 100
+            }, { transaction });
+
+            console.log(`✅ Source ledger head balance updated: ${sourceLedgerHead.name} - New balance: ₹${newCurrentBalance.toFixed(2)} (Cash: ₹${newCashBalance.toFixed(2)}, Bank: ₹${newBankBalance.toFixed(2)})`);
+
+        } catch (error) {
+            console.error('❌ Error updating source ledger head balance:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Update ledger head balance directly
      * This is the main balance update logic for the immutable system
      */
@@ -353,53 +503,89 @@ class ImmutableTransactionService {
                 throw new Error(`Ledger head not found: ${logEntry.ledger_head_id}`);
             }
 
+            // Calculate cash and bank portions based on payment method
+            const totalAmount = parseFloat(logEntry.amount || 0);
+            let cashAmount = 0;
+            let bankAmount = 0;
+
+            // Use the cash_amount and bank_amount from logEntry if available (they should be set from validateAndPrepareTransaction)
+            if (logEntry.cash_amount !== undefined && logEntry.bank_amount !== undefined) {
+                cashAmount = parseFloat(logEntry.cash_amount || 0);
+                bankAmount = parseFloat(logEntry.bank_amount || 0);
+                console.log(`Using logEntry amounts - Cash: ₹${cashAmount}, Bank: ₹${bankAmount}`);
+            } else {
+                // Fallback calculation if not present
+                if (logEntry.cash_type === 'cash') {
+                    cashAmount = totalAmount;
+                    bankAmount = 0;
+                } else if (['bank', 'upi', 'card', 'netbank', 'cheque'].includes(logEntry.cash_type)) {
+                    cashAmount = 0;
+                    bankAmount = totalAmount;
+                } else if (logEntry.cash_type === 'both' || logEntry.cash_type === 'multiple' || logEntry.cash_type === 'mixed') {
+                    cashAmount = parseFloat(logEntry.cash_amount || 0);
+                    bankAmount = parseFloat(logEntry.bank_amount || 0);
+                    console.log(`🔄 FALLBACK: Processing ${logEntry.cash_type} payment - Cash: ${cashAmount}, Bank: ${bankAmount}`);
+                } else {
+                    // Default to bank for unknown payment types
+                    cashAmount = 0;
+                    bankAmount = totalAmount;
+                }
+                console.log(`Using fallback calculation - Cash: ₹${cashAmount}, Bank: ₹${bankAmount}`);
+            }
+
             // Calculate balance change based on transaction type and ledger head type
             let balanceChange = 0;
+            let cashChange = 0;
+            let bankChange = 0;
 
             if (ledgerHead.head_type === 'credit') {
                 // For credit ledger heads: credit transactions increase balance, debit transactions decrease balance
-                balanceChange = logEntry.tx_type === 'credit' ? parseFloat(logEntry.amount || 0) : -parseFloat(logEntry.amount || 0);
+                if (logEntry.tx_type === 'credit') {
+                    balanceChange = totalAmount;
+                    cashChange = cashAmount;
+                    bankChange = bankAmount;
+                } else {
+                    // This shouldn't happen in normal operations for credit heads
+                    balanceChange = -totalAmount;
+                    cashChange = -cashAmount;
+                    bankChange = -bankAmount;
+                }
             } else if (ledgerHead.head_type === 'debit') {
-                // For debit ledger heads: debit transactions increase balance, credit transactions decrease balance
-                balanceChange = logEntry.tx_type === 'debit' ? parseFloat(logEntry.amount || 0) : -parseFloat(logEntry.amount || 0);
+                // For debit ledger heads: debit transactions increase the expense total
+                if (logEntry.tx_type === 'debit') {
+                    balanceChange = totalAmount;
+                    // For debit heads, we don't track cash/bank breakdown in the same way
+                    // The cash/bank comes from the source, but we record the expense total
+                    cashChange = 0; // Debit heads don't accumulate cash
+                    bankChange = 0; // Debit heads don't accumulate bank funds
+                } else {
+                    // This shouldn't happen in normal operations for debit heads
+                    balanceChange = -totalAmount;
+                    cashChange = 0;
+                    bankChange = 0;
+                }
             }
 
-            // Update current balance
+            // Update balances
             const newCurrentBalance = parseFloat(ledgerHead.current_balance || 0) + balanceChange;
-
-            // Update cash/bank breakdown based on cash_type
-            let newCashBalance = parseFloat(ledgerHead.cash_balance || 0);
-            let newBankBalance = parseFloat(ledgerHead.bank_balance || 0);
-
-            if (logEntry.cash_type === 'cash') {
-                newCashBalance += balanceChange;
-            } else if (logEntry.cash_type === 'bank') {
-                newBankBalance += balanceChange;
-            } else if (logEntry.cash_type === 'both') {
-                // Split based on cash_amount and bank_amount
-                const cashPortion = parseFloat(logEntry.cash_amount || logEntry.amount || 0);
-                const bankPortion = parseFloat(logEntry.bank_amount || 0);
-
-                const cashChange = ledgerHead.head_type === 'credit'
-                    ? (logEntry.tx_type === 'credit' ? cashPortion : -cashPortion)
-                    : (logEntry.tx_type === 'debit' ? cashPortion : -cashPortion);
-
-                const bankChange = ledgerHead.head_type === 'credit'
-                    ? (logEntry.tx_type === 'credit' ? bankPortion : -bankPortion)
-                    : (logEntry.tx_type === 'debit' ? bankPortion : -bankPortion);
-
-                newCashBalance += cashChange;
-                newBankBalance += bankChange;
-            }
+            const newCashBalance = parseFloat(ledgerHead.cash_balance || 0) + cashChange;
+            const newBankBalance = parseFloat(ledgerHead.bank_balance || 0) + bankChange;
 
             // Update the ledger head with new balances
-            await ledgerHead.update({
-                current_balance: newCurrentBalance,
-                cash_balance: newCashBalance,
-                bank_balance: newBankBalance
-            }, { transaction });
+            const updateData = {
+                current_balance: Math.round(newCurrentBalance * 100) / 100,
+                cash_balance: Math.round(newCashBalance * 100) / 100,
+                bank_balance: Math.round(newBankBalance * 100) / 100
+            };
 
-            console.log(`✅ Ledger head balance updated: ${ledgerHead.name} - New balance: ₹${parseFloat(newCurrentBalance).toFixed(2)} (Cash: ₹${parseFloat(newCashBalance).toFixed(2)}, Bank: ₹${parseFloat(newBankBalance).toFixed(2)})`);
+            console.log(`🔄 Updating ledger head ${ledgerHead.id} with:`, updateData);
+
+            await ledgerHead.update(updateData, { transaction });
+
+            console.log(`✅ Ledger head balance updated: ${ledgerHead.name} (${ledgerHead.head_type})`);
+            console.log(`   Previous: Total=₹${parseFloat(ledgerHead.current_balance || 0).toFixed(2)}, Cash=₹${parseFloat(ledgerHead.cash_balance || 0).toFixed(2)}, Bank=₹${parseFloat(ledgerHead.bank_balance || 0).toFixed(2)}`);
+            console.log(`   Change: Cash=₹${cashChange.toFixed(2)}, Bank=₹${bankChange.toFixed(2)}`);
+            console.log(`   New: Total=₹${newCurrentBalance.toFixed(2)}, Cash=₹${newCashBalance.toFixed(2)}, Bank=₹${newBankBalance.toFixed(2)}`);
 
         } catch (error) {
             console.error('❌ Error updating ledger head balance:', error);
@@ -410,7 +596,7 @@ class ImmutableTransactionService {
     /**
      * Update balance snapshots
      */
-    async updateBalanceSnapshots(logEntry, transaction) {
+    async updateBalanceSnapshots(logEntry, dbTransaction) {
         const snapshotDate = logEntry.transaction_date;
 
         // Get or create balance snapshot for today
@@ -420,7 +606,7 @@ class ImmutableTransactionService {
                 account_id: logEntry.account_id,
                 ledger_head_id: logEntry.ledger_head_id
             },
-            transaction
+            transaction: dbTransaction
         });
 
         const balanceChange = logEntry.tx_type === 'credit' ? parseFloat(logEntry.amount || 0) : -parseFloat(logEntry.amount || 0);
@@ -445,7 +631,7 @@ class ImmutableTransactionService {
                     total_debits: newDebits
                 }]),
                 source_transactions_hash: logEntry.current_hash
-            }, { transaction });
+            }, { transaction: dbTransaction });
 
         } else {
             // Create new snapshot
@@ -474,7 +660,35 @@ class ImmutableTransactionService {
                 source_transactions_hash: logEntry.current_hash
             };
 
-            await db.BalanceSnapshot.create(newSnapshot, { transaction });
+            await db.BalanceSnapshot.create(newSnapshot, { transaction: dbTransaction });
+        }
+    }
+
+    /**
+     * Handle receipt booklet usage
+     */
+    async handleReceiptUsage(bookletId, receiptNumber, transaction) {
+        try {
+            console.log(`📝 Handling receipt usage: Booklet ${bookletId}, Receipt ${receiptNumber}`);
+
+            // Get booklet and update pages_left
+            const booklet = await db.Booklet.findByPk(bookletId, { transaction });
+            if (!booklet) {
+                throw new Error(`Booklet not found: ${bookletId}`);
+            }
+
+            // Remove the used receipt number from pages_left
+            const updatedPagesLeft = booklet.pages_left.filter(page => page !== receiptNumber);
+
+            await booklet.update({
+                pages_left: updatedPagesLeft
+            }, { transaction });
+
+            console.log(`✅ Receipt ${receiptNumber} marked as used in booklet ${bookletId}`);
+
+        } catch (error) {
+            console.error('❌ Error handling receipt usage:', error);
+            throw error;
         }
     }
 
