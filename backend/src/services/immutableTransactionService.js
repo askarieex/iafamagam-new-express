@@ -1,6 +1,7 @@
 const db = require('../models');
 const { v4: uuidv4 } = require('uuid');
 const hashChainService = require('./hashChainService');
+const realTimeBalanceService = require('./realTimeBalanceService');
 const { Op } = require('sequelize');
 
 class ImmutableTransactionService {
@@ -44,6 +45,20 @@ class ImmutableTransactionService {
 
             await transaction.commit();
 
+            // STEP 7: Trigger automatic balance recalculation (for backdated transactions)
+            if (dateValidation.daysDifference > 0) {
+                console.log(`🔄 Triggering balance recalculation for backdated transaction (${dateValidation.daysDifference} days back)`);
+
+                // Use setImmediate to avoid blocking the response
+                setImmediate(async () => {
+                    try {
+                        await this.triggerBalanceRecalculation(logEntry, dateValidation);
+                    } catch (error) {
+                        console.error('❌ Error in background balance recalculation:', error);
+                    }
+                });
+            }
+
             console.log('✅ Immutable credit transaction created:', logEntry.transaction_uuid);
 
             return {
@@ -59,7 +74,10 @@ class ImmutableTransactionService {
                 message: logEntry.requires_approval
                     ? 'Transaction created and pending approval'
                     : 'Transaction created successfully',
-                warning: 'This transaction is now PERMANENTLY recorded and cannot be modified. Only corrections through approval workflow are possible.'
+                balanceRecalculation: dateValidation.daysDifference > 0
+                    ? 'Balance recalculation triggered for all affected months'
+                    : 'No balance recalculation needed',
+                warning: dateValidation.warning || 'This transaction is now PERMANENTLY recorded and cannot be modified. Only corrections through approval workflow are possible.'
             };
 
         } catch (error) {
@@ -126,6 +144,20 @@ class ImmutableTransactionService {
 
             await dbTransaction.commit();
 
+            // STEP 9: Trigger automatic balance recalculation (for backdated transactions)
+            if (dateValidation.daysDifference > 0) {
+                console.log(`🔄 Triggering balance recalculation for backdated debit transaction (${dateValidation.daysDifference} days back)`);
+
+                // Use setImmediate to avoid blocking the response
+                setImmediate(async () => {
+                    try {
+                        await this.triggerBalanceRecalculation(logEntry, dateValidation);
+                    } catch (error) {
+                        console.error('❌ Error in background balance recalculation:', error);
+                    }
+                });
+            }
+
             console.log('✅ Immutable debit transaction created:', logEntry.transaction_uuid);
 
             return {
@@ -141,7 +173,10 @@ class ImmutableTransactionService {
                 message: logEntry.requires_approval
                     ? 'Debit transaction created and pending approval'
                     : 'Debit transaction created successfully',
-                warning: 'This transaction is now PERMANENTLY recorded and cannot be modified. Only corrections through approval workflow are possible.'
+                balanceRecalculation: dateValidation.daysDifference > 0
+                    ? 'Balance recalculation triggered for all affected months'
+                    : 'No balance recalculation needed',
+                warning: dateValidation.warning || 'This transaction is now PERMANENTLY recorded and cannot be modified. Only corrections through approval workflow are possible.'
             };
 
         } catch (error) {
@@ -235,6 +270,7 @@ class ImmutableTransactionService {
 
     /**
      * Validate transaction date and determine approval requirements
+     * SIMPLIFIED 30-DAY NO-APPROVAL SYSTEM
      * @param {String} transactionDate - Transaction date
      * @param {Object} userContext - User context
      * @returns {Object} Date validation result
@@ -267,53 +303,37 @@ class ImmutableTransactionService {
             throw new Error('Future transaction dates are not allowed');
         }
 
-        // Current date - no approval needed
-        if (daysDifference === 0) {
+        // SIMPLIFIED NO-APPROVAL SYSTEM:
+        // Allow any transaction within 30 days without approval
+        if (daysDifference <= 30) {
+            let reason = 'Transaction allowed - within 30-day limit';
+            let warning = null;
+
+            // Provide helpful user feedback based on age
+            if (daysDifference === 0) {
+                reason = 'Same day transaction';
+            } else if (daysDifference <= 7) {
+                reason = 'Recent transaction - within one week';
+            } else if (daysDifference <= 15) {
+                reason = 'Transaction allowed - within two weeks';
+                warning = 'This transaction is more than a week old. Please ensure the date is correct.';
+            } else if (daysDifference <= 30) {
+                reason = 'Transaction allowed - within 30-day limit';
+                warning = `This transaction is ${daysDifference} days old. Please verify the date is accurate.`;
+            }
+
             return {
                 allowed: true,
                 approvalLevel: 0,
-                reason: 'Current date transaction',
+                reason: reason,
+                warning: warning,
+                daysDifference: daysDifference,
                 status: 'allowed'
             };
         }
 
-        // Weekend grace period (1-2 days back from Monday)
-        if (daysDifference <= 2 && this.isWeekendGracePeriod(transactionDate, today)) {
-            return {
-                allowed: true,
-                approvalLevel: 0,
-                reason: 'Weekend grace period',
-                dateOverrideReason: 'Weekend work entry delay',
-                status: 'grace_period'
-            };
-        }
-
-        // Short backdate (3-5 days) - Manager approval required
-        if (daysDifference <= 5) {
-            return {
-                allowed: true,
-                approvalLevel: 1,
-                requiredRole: 'manager',
-                reason: 'Short backdate with manager approval',
-                dateOverrideReason: 'Business delay justification required',
-                status: 'needs_approval'
-            };
-        }
-
-        // Extended backdate (6-10 days) - Director approval required
-        if (daysDifference <= 10) {
-            return {
-                allowed: true,
-                approvalLevel: 2,
-                requiredRole: 'director',
-                reason: 'Extended backdate with director approval',
-                dateOverrideReason: 'Extended business delay with strong justification',
-                status: 'needs_high_approval'
-            };
-        }
-
-        // Beyond 10 days - Not allowed for backdating
-        throw new Error(`Cannot backdate beyond 10 days. Use correction workflow instead for transactions older than 10 days.`);
+        // Beyond 30 days - Blocked (use correction workflow)
+        throw new Error(`Cannot enter transaction older than 30 days (${daysDifference} days ago). Please use correction workflow for historical adjustments.`);
     }
 
     /**
@@ -330,18 +350,30 @@ class ImmutableTransactionService {
 
     /**
      * Validate sufficient balance for debit transactions
+     * ENHANCED FOR BACKDATE SAFETY - Checks balance on transaction date, not current date
      */
     async validateSufficientBalance(transactionData) {
         // For debit transactions, check the source ledger head balance
         const sourceLedgerHeadId = transactionData.source_ledger_head_id || transactionData.ledger_head_id;
-        const currentBalance = await this.calculateCurrentBalance(
+
+        // CRITICAL: Calculate balance as of the transaction date (not current date)
+        // This prevents impossible negative balances for backdated transactions
+        const balanceOnTransactionDate = await this.calculateCurrentBalance(
             transactionData.account_id,
-            sourceLedgerHeadId
+            sourceLedgerHeadId,
+            transactionData.transaction_date  // Use transaction date for historical balance
         );
 
-        if (currentBalance < transactionData.amount) {
-            throw new Error(`Insufficient balance. Available: ₹${currentBalance.toFixed(2)}, Required: ₹${transactionData.amount.toFixed(2)}`);
+        if (balanceOnTransactionDate < transactionData.amount) {
+            throw new Error(
+                `Insufficient balance on ${transactionData.transaction_date}. ` +
+                `Available: ₹${balanceOnTransactionDate.toFixed(2)}, ` +
+                `Required: ₹${transactionData.amount.toFixed(2)}. ` +
+                `Tip: Ensure credit transactions exist before this date, or use a later date.`
+            );
         }
+
+        console.log(`✅ Balance validation passed: ₹${balanceOnTransactionDate.toFixed(2)} available on ${transactionData.transaction_date}, requiring ₹${transactionData.amount.toFixed(2)}`);
     }
 
     /**
@@ -437,24 +469,28 @@ class ImmutableTransactionService {
                 throw new Error(`Source ledger head not found: ${sourceLedgerHeadId}`);
             }
 
-            // Calculate cash and bank portions for deduction
+            // Calculate cash and bank portions for deduction PROPORTIONALLY
             const amountToDeduct = parseFloat(logEntry.amount || 0);
+            const currentCash = parseFloat(sourceLedgerHead.cash_balance || 0);
+            const currentBank = parseFloat(sourceLedgerHead.bank_balance || 0);
+            const currentTotal = currentCash + currentBank;
+
             let cashToDeduct = 0;
             let bankToDeduct = 0;
 
-            if (logEntry.cash_type === 'cash') {
-                cashToDeduct = amountToDeduct;
-                bankToDeduct = 0;
-            } else if (['bank', 'upi', 'card', 'netbank', 'cheque'].includes(logEntry.cash_type)) {
-                cashToDeduct = 0;
-                bankToDeduct = amountToDeduct;
-            } else if (logEntry.cash_type === 'both' || logEntry.cash_type === 'multiple') {
-                cashToDeduct = parseFloat(logEntry.cash_amount || 0);
-                bankToDeduct = parseFloat(logEntry.bank_amount || 0);
-            } else {
-                // Default to bank for unknown payment types
-                cashToDeduct = 0;
-                bankToDeduct = amountToDeduct;
+            // IMPORTANT: Deduct based on actual payment method used
+            // This correctly tracks where the money actually came from
+            cashToDeduct = parseFloat(logEntry.cash_amount || 0);
+            bankToDeduct = parseFloat(logEntry.bank_amount || 0);
+
+            console.log(`💰 Payment method deduction: Total ₹${amountToDeduct} = Cash ₹${cashToDeduct.toFixed(2)} + Bank ₹${bankToDeduct.toFixed(2)} (${logEntry.cash_type})`);
+
+            // Validate that the source has sufficient cash and bank balances
+            if (cashToDeduct > currentCash + 0.01) {
+                throw new Error(`Insufficient cash balance in ${sourceLedgerHead.name}. Required: ₹${cashToDeduct.toFixed(2)}, Available: ₹${currentCash.toFixed(2)}`);
+            }
+            if (bankToDeduct > currentBank + 0.01) {
+                throw new Error(`Insufficient bank balance in ${sourceLedgerHead.name}. Required: ₹${bankToDeduct.toFixed(2)}, Available: ₹${currentBank.toFixed(2)}`);
             }
 
             // Calculate new balances
@@ -462,15 +498,9 @@ class ImmutableTransactionService {
             const newCashBalance = parseFloat(sourceLedgerHead.cash_balance || 0) - cashToDeduct;
             const newBankBalance = parseFloat(sourceLedgerHead.bank_balance || 0) - bankToDeduct;
 
-            // Validate sufficient balance
+            // Final validation: ensure new balances are not negative
             if (newCurrentBalance < -0.01) {
                 throw new Error(`Insufficient total balance in ${sourceLedgerHead.name}. Required: ₹${amountToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.current_balance}`);
-            }
-            if (newCashBalance < -0.01 && cashToDeduct > 0) {
-                throw new Error(`Insufficient cash balance in ${sourceLedgerHead.name}. Required: ₹${cashToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.cash_balance}`);
-            }
-            if (newBankBalance < -0.01 && bankToDeduct > 0) {
-                throw new Error(`Insufficient bank balance in ${sourceLedgerHead.name}. Required: ₹${bankToDeduct.toFixed(2)}, Available: ₹${sourceLedgerHead.bank_balance}`);
             }
 
             // Update the source ledger head
@@ -900,6 +930,104 @@ class ImmutableTransactionService {
         }, { transaction });
 
         console.log(`✅ Receipt ${receiptNumber} used from booklet ${bookletId}. ${updatedPagesLeft.length} receipts remaining.`);
+    }
+
+    /**
+     * Trigger automatic balance recalculation for backdated transactions
+     * This implements the cascading balance update system described in the documentation
+     */
+    async triggerBalanceRecalculation(logEntry, dateValidation) {
+        try {
+            console.log(`🔄 Starting balance recalculation for backdated transaction:`);
+            console.log(`   Transaction Date: ${logEntry.transaction_date}`);
+            console.log(`   Days Back: ${dateValidation.daysDifference}`);
+            console.log(`   Amount: ₹${logEntry.amount}`);
+            console.log(`   Type: ${logEntry.tx_type}`);
+            console.log(`   Ledger Head: ${logEntry.ledger_head_id}`);
+
+            // Create a mock transaction object for the real-time balance service
+            const transactionForBalanceService = {
+                id: logEntry.log_id,
+                transaction_uuid: logEntry.transaction_uuid,
+                tx_date: logEntry.transaction_date,
+                account_id: logEntry.account_id,
+                ledger_head_id: logEntry.ledger_head_id,
+                amount: logEntry.amount,
+                tx_type: logEntry.tx_type,
+                cash_amount: logEntry.cash_amount,
+                bank_amount: logEntry.bank_amount
+            };
+
+            // Trigger the real-time balance service to recalculate all affected months
+            await realTimeBalanceService.handleBackdatedTransaction(transactionForBalanceService);
+
+            // Also update the monthly balance summaries using the monthlyReportService
+            await this.updateMonthlyBalanceSummaries(logEntry, dateValidation);
+
+            console.log(`✅ Balance recalculation completed for transaction ${logEntry.transaction_uuid}`);
+
+        } catch (error) {
+            console.error('❌ Error in balance recalculation:', error);
+            // Don't throw the error - this is a background process
+            // Log it for monitoring but don't fail the main transaction
+        }
+    }
+
+    /**
+     * Update monthly balance summaries for all affected months
+     */
+    async updateMonthlyBalanceSummaries(logEntry, dateValidation) {
+        try {
+            // Get the monthly report service if available
+            const monthlyReportService = require('./monthlyReportService');
+
+            // Identify all months that need recalculation
+            const transactionDate = new Date(logEntry.transaction_date);
+            const currentDate = new Date();
+
+            console.log(`🔄 Updating monthly summaries from ${transactionDate.toISOString().substr(0, 7)} to ${currentDate.toISOString().substr(0, 7)}`);
+
+            // Recalculate month-by-month to ensure cascading updates
+            let processingDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), 1);
+            const endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+
+            while (processingDate <= endDate) {
+                const year = processingDate.getFullYear();
+                const month = processingDate.getMonth() + 1;
+
+                console.log(`🔄 Recalculating monthly summary for ${year}-${month.toString().padStart(2, '0')}`);
+
+                // Use the monthly report service to recalculate this month
+                await monthlyReportService.generateMonthlyReport(logEntry.account_id, year, month);
+
+                // Move to next month
+                processingDate.setMonth(processingDate.getMonth() + 1);
+            }
+
+            console.log(`✅ Monthly balance summaries updated successfully`);
+
+        } catch (error) {
+            console.error('❌ Error updating monthly balance summaries:', error);
+            // Don't throw - this is a fallback system
+        }
+    }
+
+    /**
+     * Add date validation endpoint for frontend
+     */
+    async validateDateOnly(transactionDate, userContext) {
+        try {
+            const validation = await this.validateTransactionDate(transactionDate, userContext);
+            return {
+                success: true,
+                data: validation
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message
+            };
+        }
     }
 }
 

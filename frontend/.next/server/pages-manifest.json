@@ -3,7 +3,7 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/transactions": "pages/transactions.js",
-  "/dashboard": "pages/dashboard.js",
   "/manage-ledger": "pages/manage-ledger.js",
-  "/monthly-reports": "pages/monthly-reports.js"
+  "/monthly-reports": "pages/monthly-reports.js",
+  "/accounts": "pages/accounts.js"
 }

@@ -1,5 +1,79 @@
 const db = require('../models');
 const { Op } = require('sequelize');
+const immutableTransactionService = require('../services/immutableTransactionService');
+
+/**
+ * Calculate cash and bank balances from transaction logs
+ * IMPORTANT: The cash/bank split represents the CURRENT composition of the balance
+ * proportional to the total balance, not historical totals
+ */
+async function calculateCashAndBankBalances(accountId, ledgerHeadId) {
+    try {
+        // First get the current total balance
+        const totalBalance = await immutableTransactionService.calculateCurrentBalance(
+            accountId,
+            ledgerHeadId
+        );
+
+        if (totalBalance <= 0) {
+            return { cash: 0, bank: 0 };
+        }
+
+        // Get the ledger head to check its type
+        const ledgerHead = await db.LedgerHead.findByPk(ledgerHeadId);
+        if (!ledgerHead) {
+            return { cash: 0, bank: 0 };
+        }
+
+        const transactions = await db.TransactionLog.findAll({
+            where: {
+                account_id: accountId,
+                ledger_head_id: ledgerHeadId
+            }
+        });
+
+        let totalCashInflow = 0;
+        let totalBankInflow = 0;
+        let totalCashOutflow = 0;
+        let totalBankOutflow = 0;
+
+        // Calculate all cash and bank flows
+        transactions.forEach(tx => {
+            const cashAmount = parseFloat(tx.cash_amount || 0);
+            const bankAmount = parseFloat(tx.bank_amount || 0);
+
+            if (tx.tx_type === 'credit') {
+                totalCashInflow += cashAmount;
+                totalBankInflow += bankAmount;
+            } else {
+                totalCashOutflow += cashAmount;
+                totalBankOutflow += bankAmount;
+            }
+        });
+
+        // Calculate net cash and bank amounts
+        const netCash = totalCashInflow - totalCashOutflow;
+        const netBank = totalBankInflow - totalBankOutflow;
+        const netTotal = netCash + netBank;
+
+        // If net total doesn't match current balance, proportionally adjust
+        if (netTotal > 0 && Math.abs(netTotal - totalBalance) > 0.01) {
+            const ratio = totalBalance / netTotal;
+            return {
+                cash: Math.max(0, netCash * ratio),
+                bank: Math.max(0, netBank * ratio)
+            };
+        }
+
+        return {
+            cash: Math.max(0, netCash),
+            bank: Math.max(0, netBank)
+        };
+    } catch (error) {
+        console.error('Error calculating cash and bank balances:', error);
+        return { cash: 0, bank: 0 };
+    }
+}
 
 /**
  * Get all ledger heads
@@ -27,10 +101,37 @@ exports.getAllLedgerHeads = async (req, res) => {
             order: [['name', 'ASC']]
         });
 
+        // Calculate real-time balances for each ledger head
+        const ledgerHeadsWithRealTimeBalances = await Promise.all(
+            ledgerHeads.map(async (ledgerHead) => {
+                try {
+                    // Calculate real-time balance from transaction logs
+                    const balance = await immutableTransactionService.calculateCurrentBalance(
+                        ledgerHead.account_id,
+                        ledgerHead.id
+                    );
+
+                    // Use actual database values for cash/bank breakdown
+                    // Convert to plain object and update balances
+                    const ledgerHeadData = ledgerHead.toJSON();
+                    ledgerHeadData.current_balance = balance;
+                    // Keep original database cash/bank values
+                    ledgerHeadData.cash_balance = parseFloat(ledgerHead.cash_balance) || 0;
+                    ledgerHeadData.bank_balance = parseFloat(ledgerHead.bank_balance) || 0;
+
+                    return ledgerHeadData;
+                } catch (error) {
+                    console.error(`Error calculating balance for ledger head ${ledgerHead.id}:`, error);
+                    // Return original data if calculation fails
+                    return ledgerHead.toJSON();
+                }
+            })
+        );
+
         return res.status(200).json({
             success: true,
-            count: ledgerHeads.length,
-            data: ledgerHeads
+            count: ledgerHeadsWithRealTimeBalances.length,
+            data: ledgerHeadsWithRealTimeBalances
         });
     } catch (error) {
         console.error('Error fetching ledger heads:', error);

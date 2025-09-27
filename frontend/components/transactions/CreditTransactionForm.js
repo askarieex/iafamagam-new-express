@@ -226,6 +226,7 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
             console.error('Date validation error:', error);
 
             // Fallback to client-side validation if API fails
+            // SIMPLIFIED 30-DAY NO-APPROVAL SYSTEM
             const today = new Date().toISOString().split('T')[0];
             const selectedDate = new Date(date);
             const todayDate = new Date(today);
@@ -237,24 +238,36 @@ export default function CreditTransactionForm({ onSuccess, onCancel }) {
                     reason: 'Future dates are not allowed',
                     status: 'error'
                 });
-            } else if (daysDifference === 0) {
+            } else if (daysDifference <= 30) {
+                // SIMPLIFIED: Allow any transaction within 30 days without approval
+                let reason = 'Transaction allowed - within 30-day limit';
+                let warning = null;
+
+                if (daysDifference === 0) {
+                    reason = 'Same day transaction';
+                } else if (daysDifference <= 7) {
+                    reason = 'Recent transaction - within one week';
+                } else if (daysDifference <= 15) {
+                    reason = 'Transaction allowed - within two weeks';
+                    warning = 'This transaction is more than a week old. Please ensure the date is correct.';
+                } else if (daysDifference <= 30) {
+                    reason = 'Transaction allowed - within 30-day limit';
+                    warning = `This transaction is ${daysDifference} days old. Please verify the date is accurate.`;
+                }
+
                 setDateValidation({
                     allowed: true,
                     approvalLevel: 0,
-                    reason: 'Current date - No approval needed',
+                    reason: reason,
+                    warning: warning,
+                    daysDifference: daysDifference,
                     status: 'allowed'
                 });
-            } else if (daysDifference <= 2) {
-                setDateValidation({
-                    allowed: true,
-                    approvalLevel: 0,
-                    reason: 'Weekend grace period',
-                    status: 'grace_period'
-                });
             } else {
+                // Beyond 30 days - Blocked
                 setDateValidation({
                     allowed: false,
-                    reason: 'Please contact administrator for older dates',
+                    reason: `Cannot enter transaction older than 30 days (${daysDifference} days ago). Please use correction workflow for historical adjustments.`,
                     status: 'error'
                 });
             }

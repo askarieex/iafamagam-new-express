@@ -31,7 +31,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         cash_amount: '',
         bank_amount: '',
         cash_type: 'cash',         // Now can be: cash, bank, multiple, or cheque
-        tx_date: new Date().toISOString().split('T')[0], // Current date in YYYY-MM-DD format
+        transaction_date: new Date().toISOString().split('T')[0], // Current date in YYYY-MM-DD format
         description: '',
         voucher_number: '',
         manual_voucher: false,
@@ -76,7 +76,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                     cash_amount: transaction.cash_amount || '',
                     bank_amount: transaction.bank_amount || '',
                     cash_type: transaction.cash_type || 'cash',
-                    tx_date: transaction.tx_date || new Date().toISOString().split('T')[0],
+                    transaction_date: transaction.transaction_date || transaction.tx_date || new Date().toISOString().split('T')[0],
                     description: transaction.description || '',
                     voucher_number: transaction.voucher_number || '',
                     manual_voucher: transaction.manual_voucher || false,
@@ -88,7 +88,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
 
                 if (transaction.account_id) {
                     await fetchLedgerHeads(transaction.account_id);
-                    await fetchBalancesForDate(transaction.account_id, transaction.tx_date);
+                    await fetchBalancesForDate(transaction.account_id, transaction.transaction_date || transaction.tx_date);
                 }
             }
         } catch (error) {
@@ -164,11 +164,11 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         today.setHours(23, 59, 59, 999);
 
         if (selectedDate > today) {
-            setErrors(prev => ({ ...prev, tx_date: 'Future transaction dates are not allowed' }));
+            setErrors(prev => ({ ...prev, transaction_date: 'Future transaction dates are not allowed' }));
             return false;
         }
 
-        setErrors(prev => ({ ...prev, tx_date: '' }));
+        setErrors(prev => ({ ...prev, transaction_date: '' }));
         return true;
     };
 
@@ -184,7 +184,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
         }
 
         // Handle date changes
-        if (name === 'tx_date' && value) {
+        if (name === 'transaction_date' && value) {
             validateDate(value);
             if (formData.account_id) {
                 fetchBalancesForDate(formData.account_id, value);
@@ -221,7 +221,7 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
     const validateForm = () => {
         const newErrors = {};
 
-        if (!formData.tx_date) newErrors.tx_date = 'Transaction date is required';
+        if (!formData.transaction_date) newErrors.transaction_date = 'Transaction date is required';
         if (!formData.account_id) newErrors.account_id = 'Account is required';
         if (!formData.source_ledger_head_id) newErrors.source_ledger_head_id = 'Source ledger head is required';
         if (!formData.ledger_head_id) newErrors.ledger_head_id = 'Destination ledger head is required';
@@ -396,17 +396,17 @@ export default function DebitTransactionForm({ onSuccess, onCancel, transaction 
                         <label className="block text-sm font-medium mb-2">Transaction Date *</label>
                         <input
                             type="date"
-                            name="tx_date"
-                            value={formData.tx_date}
+                            name="transaction_date"
+                            value={formData.transaction_date}
                             onChange={handleInputChange}
                             max={new Date().toISOString().split('T')[0]}
                             className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                errors.tx_date ? 'border-red-500' : 'border-gray-300'
+                                errors.transaction_date ? 'border-red-500' : 'border-gray-300'
                             }`}
                             required
                         />
-                        {errors.tx_date && (
-                            <p className="text-red-500 text-sm mt-1">{errors.tx_date}</p>
+                        {errors.transaction_date && (
+                            <p className="text-red-500 text-sm mt-1">{errors.transaction_date}</p>
                         )}
                     </div>
 

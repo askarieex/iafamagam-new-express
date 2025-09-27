@@ -19,10 +19,15 @@ self.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/dashboard": [
+    "/accounts": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/dashboard.js"
+      "static/chunks/pages/accounts.js"
+    ],
+    "/manage-ledger": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/manage-ledger.js"
     ],
     "/monthly-reports": [
       "static/chunks/webpack.js",

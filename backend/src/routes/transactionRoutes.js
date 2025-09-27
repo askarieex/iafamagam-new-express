@@ -16,7 +16,7 @@ router.get('/history', protect, immutableTransactionController.getTransactionHis
 router.get('/balance', protect, immutableTransactionController.getBalanceSummary);
 router.get('/balance/live', protect, immutableTransactionController.getLiveBalanceSummary);
 router.get('/integrity/verify', protect, authorize(['admin']), immutableTransactionController.verifySystemIntegrity);
-router.post('/validate-date', protect, immutableTransactionController.validateTransactionDate);
+router.post('/validate-date', protect, immutableTransactionController.validateDate);
 
 // Monthly report endpoints (temporary placement)
 const simpleMonthlyController = require('../controllers/simpleMonthlyReportController');

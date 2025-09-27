@@ -525,6 +525,62 @@ class ImmutableTransactionController {
     }
 
     /**
+     * Validate transaction date for frontend
+     * @route POST /api/transactions/validate-date
+     */
+    validateDate = async (req, res) => {
+        try {
+            console.log('🔄 Validating transaction date...');
+
+            const { transaction_date } = req.body;
+
+            if (!transaction_date) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Transaction date is required'
+                });
+            }
+
+            // Extract user context from request
+            const userContext = {
+                userId: req.user.id,
+                ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
+                userAgent: req.get('User-Agent') || 'unknown',
+                sessionId: req.sessionID || null
+            };
+
+            // Validate the date using the immutable transaction service
+            const result = await immutableTransactionService.validateDateOnly(transaction_date, userContext);
+
+            console.log('✅ Date validation completed:', result);
+
+            return res.status(200).json({
+                success: result.success,
+                data: result.data || null,
+                message: result.success ? 'Date validation successful' : result.error,
+                system_info: {
+                    backdate_policy: '30_DAY_NO_APPROVAL',
+                    max_backdate_days: 30,
+                    approval_required: false
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Date validation failed:', error);
+
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+                error_type: 'DATE_VALIDATION_ERROR',
+                system_info: {
+                    backdate_policy: '30_DAY_NO_APPROVAL',
+                    max_backdate_days: 30
+                }
+            });
+        }
+    }
+
+    /**
      * Log security events
      */
     async logSecurityEvent(req, eventType, eventData) {

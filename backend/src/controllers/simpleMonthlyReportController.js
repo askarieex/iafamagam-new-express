@@ -6,6 +6,80 @@
 
 const db = require('../models');
 const { Op } = require('sequelize');
+const immutableTransactionService = require('../services/immutableTransactionService');
+
+/**
+ * Calculate cash and bank balances from transaction logs
+ * IMPORTANT: The cash/bank split represents the composition of the balance
+ * proportional to the total balance, either current or historical
+ */
+async function calculateCashAndBankBalances(accountId, ledgerHeadId, asOfDate = null) {
+    try {
+        // Get the total balance (current or historical based on asOfDate)
+        const totalBalance = await immutableTransactionService.calculateCurrentBalance(
+            accountId,
+            ledgerHeadId,
+            asOfDate
+        );
+
+        if (totalBalance <= 0) {
+            return { cash: 0, bank: 0 };
+        }
+
+        // Get the ledger head to check its type
+        const ledgerHead = await db.LedgerHead.findByPk(ledgerHeadId);
+        if (!ledgerHead) {
+            return { cash: 0, bank: 0 };
+        }
+
+        const whereCondition = {
+            account_id: accountId,
+            ledger_head_id: ledgerHeadId
+        };
+
+        // If asOfDate is provided, only include transactions up to that date
+        if (asOfDate) {
+            whereCondition.transaction_date = { [Op.lte]: asOfDate };
+        }
+
+        const transactions = await db.TransactionLog.findAll({
+            where: whereCondition
+        });
+
+        let totalCashInflow = 0;
+        let totalBankInflow = 0;
+        let totalCashOutflow = 0;
+        let totalBankOutflow = 0;
+
+        // Calculate all cash and bank flows
+        transactions.forEach(tx => {
+            const cashAmount = parseFloat(tx.cash_amount || 0);
+            const bankAmount = parseFloat(tx.bank_amount || 0);
+
+            if (tx.tx_type === 'credit') {
+                totalCashInflow += cashAmount;
+                totalBankInflow += bankAmount;
+            } else {
+                totalCashOutflow += cashAmount;
+                totalBankOutflow += bankAmount;
+            }
+        });
+
+        // Calculate net cash and bank amounts
+        const netCash = totalCashInflow - totalCashOutflow;
+        const netBank = totalBankInflow - totalBankOutflow;
+
+        // For monthly reports, use the actual transaction amounts without proportional adjustment
+        // This ensures accurate cash/bank breakdown regardless of backdated transactions
+        return {
+            cash: Math.max(0, netCash),
+            bank: Math.max(0, netBank)
+        };
+    } catch (error) {
+        console.error('Error calculating cash and bank balances:', error);
+        return { cash: 0, bank: 0 };
+    }
+}
 
 class SimpleMonthlyReportController {
 
@@ -111,7 +185,8 @@ class SimpleMonthlyReportController {
             // First, create entries for all ledger heads in the system
             for (const ledgerHead of allLedgerHeadsInSystem) {
                 const ledgerHeadId = ledgerHead.id;
-                const openingBalance = ledgerHead.head_type === 'credit' ? (openingBalances[ledgerHeadId] || 0) : 0;
+                // FIXED: Calculate opening balance for BOTH credit and debit heads
+                const openingBalance = openingBalances[ledgerHeadId] || 0;
 
                 if (ledgerHead.head_type === 'credit') {
                     totalOpeningBalance += openingBalance;
@@ -152,6 +227,8 @@ class SimpleMonthlyReportController {
                         totalCredits += amount;
                     } else {
                         ledgerSummary[ledgerHeadId].total_debits += amount;
+                        // FIXED: For debit transactions, track the cash/bank breakdown correctly
+                        // This shows what type of payment was used for expenses
                         ledgerSummary[ledgerHeadId].cash_amount = (ledgerSummary[ledgerHeadId].cash_amount || 0) + cashAmount;
                         ledgerSummary[ledgerHeadId].bank_amount = (ledgerSummary[ledgerHeadId].bank_amount || 0) + bankAmount;
                         totalDebits += amount;
@@ -161,16 +238,76 @@ class SimpleMonthlyReportController {
                 }
             }
 
-            // Calculate closing balances
-            Object.values(ledgerSummary).forEach(summary => {
-                if (summary.ledger_head.type === 'credit') {
-                    // For credit heads (income): Opening Balance + Credits - Debits
-                    summary.closing_balance = summary.opening_balance + summary.total_credits - summary.total_debits;
-                } else {
-                    // For debit heads (expenses): Only show the amount spent this month
-                    summary.closing_balance = summary.total_debits;
+            // Calculate HISTORICAL closing balances and cash/bank breakdown
+            // IMPORTANT: Always use transaction log calculation to handle backdated transactions correctly
+            const ledgerSummaryPromises = Object.values(ledgerSummary).map(async (summary) => {
+                try {
+                    if (summary.ledger_head.type === 'credit') {
+                        // Check if this is the current month
+                        const today = new Date();
+                        const currentYear = today.getFullYear();
+                        const currentMonth = today.getMonth() + 1;
+                        const isCurrentMonth = (yearNum === currentYear && monthNum === currentMonth);
+
+                        if (isCurrentMonth) {
+                            // For current month: Use current date (includes all transactions up to today)
+                            const currentBalance = await immutableTransactionService.calculateCurrentBalance(
+                                summary.account.id,
+                                summary.ledger_head.id,
+                                today.toISOString().split('T')[0] // Use today's date
+                            );
+
+                            // Calculate cash/bank breakdown as of today
+                            const currentCashBank = await calculateCashAndBankBalances(
+                                summary.account.id,
+                                summary.ledger_head.id,
+                                today.toISOString().split('T')[0]
+                            );
+
+                            summary.closing_balance = currentBalance;
+                            summary.cash_amount = currentCashBank.cash;
+                            summary.bank_amount = currentCashBank.bank;
+                        } else {
+                            // For historical months: Show balance as of month-end from transaction log
+                            const monthEnd = new Date(yearNum, monthNum, 0); // Last day of selected month
+                            const historicalBalance = await immutableTransactionService.calculateCurrentBalance(
+                                summary.account.id,
+                                summary.ledger_head.id,
+                                monthEnd.toISOString().split('T')[0] // Always pass asOfDate for consistency
+                            );
+
+                            // Calculate historical cash/bank breakdown as of month-end
+                            const historicalCashBank = await calculateCashAndBankBalances(
+                                summary.account.id,
+                                summary.ledger_head.id,
+                                monthEnd.toISOString().split('T')[0]
+                            );
+
+                            summary.closing_balance = historicalBalance;
+                            summary.cash_amount = historicalCashBank.cash;
+                            summary.bank_amount = historicalCashBank.bank;
+                        }
+                    } else {
+                        // For debit heads (expenses): Show the amount spent this month
+                        summary.closing_balance = summary.total_debits;
+                        summary.current_cash_balance = summary.cash_amount;
+                        summary.current_bank_balance = summary.bank_amount;
+                    }
+                } catch (error) {
+                    console.error(`Error calculating real-time balance for ledger head ${summary.ledger_head.id}:`, error);
+                    // Fallback to historical calculation if real-time fails
+                    if (summary.ledger_head.type === 'credit') {
+                        summary.closing_balance = summary.opening_balance + summary.total_credits - summary.total_debits;
+                    } else {
+                        summary.closing_balance = summary.total_debits;
+                    }
+                    // Keep existing cash/bank amounts for fallback
                 }
+                return summary;
             });
+
+            // Wait for all balance calculations to complete
+            await Promise.all(ledgerSummaryPromises);
 
             // Get account names for the header
             let accountDisplayName = 'ALL ACCOUNTS COMBINED';
