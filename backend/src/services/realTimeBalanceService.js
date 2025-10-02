@@ -14,10 +14,7 @@
  */
 
 const { Op } = require('sequelize');
-const { sequelize } = require('../models');
-const TransactionLog = require('../models/transactionLog')(sequelize);
-const MonthlyBalanceSummary = require('../models/monthlyBalanceSummary')(sequelize);
-const LedgerHead = require('../models/ledgerHead')(sequelize);
+const db = require('../models');
 
 class RealTimeBalanceService {
     constructor() {
@@ -32,7 +29,7 @@ class RealTimeBalanceService {
         try {
             console.log(`🔄 Processing real-time balance update for transaction ${transaction.id}`);
 
-            const transactionDate = new Date(transaction.tx_date);
+            const transactionDate = new Date(transaction.transaction_date);
             const affectedMonths = await this.getAffectedMonths(transactionDate, transaction.account_id);
 
             // Update all affected months in chronological order
@@ -91,7 +88,7 @@ class RealTimeBalanceService {
             console.log(`🔄 Updating balances for ${year}-${month}, Account: ${accountId}`);
 
             // Get all ledger heads for this account
-            const ledgerHeads = await LedgerHead.findAll({
+            const ledgerHeads = await db.LedgerHead.findAll({
                 where: { account_id: accountId }
             });
 
@@ -124,11 +121,11 @@ class RealTimeBalanceService {
             const openingBalance = await this.getOpeningBalance(ledgerHeadId, accountId, monthStart);
 
             // Get monthly transactions
-            const monthlyTransactions = await TransactionLog.findAll({
+            const monthlyTransactions = await db.TransactionLog.findAll({
                 where: {
                     ledger_head_id: ledgerHeadId,
                     account_id: accountId,
-                    tx_date: {
+                    transaction_date: {
                         [Op.between]: [monthStart, monthEnd]
                     }
                 }
@@ -136,7 +133,7 @@ class RealTimeBalanceService {
 
             // Calculate monthly totals
             const totals = monthlyTransactions.reduce((acc, tx) => {
-                if (tx.entry_type === 'credit') {
+                if (tx.tx_type === 'credit') {
                     acc.totalCredits += parseFloat(tx.amount);
                 } else {
                     acc.totalDebits += parseFloat(tx.amount);
@@ -155,7 +152,7 @@ class RealTimeBalanceService {
             // Update or create monthly balance summary
             const monthYear = `${year}-${month.toString().padStart(2, '0')}-01`;
 
-            await MonthlyBalanceSummary.upsert({
+            await db.MonthlyBalanceSummary.upsert({
                 ledger_head_id: ledgerHeadId,
                 account_id: accountId,
                 month_year: monthYear,
@@ -192,7 +189,7 @@ class RealTimeBalanceService {
             previousMonth.setMonth(previousMonth.getMonth() - 1);
             const previousMonthYear = `${previousMonth.getFullYear()}-${(previousMonth.getMonth() + 1).toString().padStart(2, '0')}-01`;
 
-            const previousMonthSummary = await MonthlyBalanceSummary.findOne({
+            const previousMonthSummary = await db.MonthlyBalanceSummary.findOne({
                 where: {
                     ledger_head_id: ledgerHeadId,
                     account_id: accountId,
@@ -207,18 +204,18 @@ class RealTimeBalanceService {
                 openingBalance = parseFloat(previousMonthSummary.closing_balance);
             } else {
                 // Calculate from all transactions before this month
-                const allPreviousTransactions = await TransactionLog.findAll({
+                const allPreviousTransactions = await db.TransactionLog.findAll({
                     where: {
                         ledger_head_id: ledgerHeadId,
                         account_id: accountId,
-                        tx_date: {
+                        transaction_date: {
                             [Op.lt]: monthStart
                         }
                     }
                 });
 
                 openingBalance = allPreviousTransactions.reduce((balance, tx) => {
-                    if (tx.entry_type === 'credit') {
+                    if (tx.tx_type === 'credit') {
                         return balance + parseFloat(tx.amount);
                     } else {
                         return balance - parseFloat(tx.amount);
@@ -242,7 +239,7 @@ class RealTimeBalanceService {
     async getCurrentBalance(ledgerHeadId, accountId) {
         try {
             // Calculate balance from all transactions
-            const allTransactions = await TransactionLog.findAll({
+            const allTransactions = await db.TransactionLog.findAll({
                 where: {
                     ledger_head_id: ledgerHeadId,
                     account_id: accountId
@@ -250,7 +247,7 @@ class RealTimeBalanceService {
             });
 
             const currentBalance = allTransactions.reduce((balance, tx) => {
-                if (tx.entry_type === 'credit') {
+                if (tx.tx_type === 'credit') {
                     return balance + parseFloat(tx.amount);
                 } else {
                     return balance - parseFloat(tx.amount);
@@ -270,7 +267,7 @@ class RealTimeBalanceService {
      */
     async getLiveBalanceSummary(accountId) {
         try {
-            const ledgerHeads = await LedgerHead.findAll({
+            const ledgerHeads = await db.LedgerHead.findAll({
                 where: { account_id: accountId }
             });
 
@@ -280,7 +277,7 @@ class RealTimeBalanceService {
                 const currentBalance = await this.getCurrentBalance(ledgerHead.id, accountId);
 
                 // Get total credits and debits for this ledger head
-                const transactions = await TransactionLog.findAll({
+                const transactions = await db.TransactionLog.findAll({
                     where: {
                         ledger_head_id: ledgerHead.id,
                         account_id: accountId

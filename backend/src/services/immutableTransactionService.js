@@ -45,19 +45,21 @@ class ImmutableTransactionService {
 
             await transaction.commit();
 
-            // STEP 7: Trigger automatic balance recalculation (for backdated transactions)
+            // STEP 7: Trigger automatic balance recalculation (for ALL transactions)
             if (dateValidation.daysDifference > 0) {
                 console.log(`🔄 Triggering balance recalculation for backdated transaction (${dateValidation.daysDifference} days back)`);
-
-                // Use setImmediate to avoid blocking the response
-                setImmediate(async () => {
-                    try {
-                        await this.triggerBalanceRecalculation(logEntry, dateValidation);
-                    } catch (error) {
-                        console.error('❌ Error in background balance recalculation:', error);
-                    }
-                });
+            } else {
+                console.log(`🔄 Triggering snapshot update for current transaction`);
             }
+
+            // Use setImmediate to avoid blocking the response
+            setImmediate(async () => {
+                try {
+                    await this.triggerBalanceRecalculation(logEntry, dateValidation);
+                } catch (error) {
+                    console.error('❌ Error in background balance recalculation:', error);
+                }
+            });
 
             console.log('✅ Immutable credit transaction created:', logEntry.transaction_uuid);
 
@@ -144,19 +146,21 @@ class ImmutableTransactionService {
 
             await dbTransaction.commit();
 
-            // STEP 9: Trigger automatic balance recalculation (for backdated transactions)
+            // STEP 9: Trigger automatic balance recalculation (for ALL transactions)
             if (dateValidation.daysDifference > 0) {
                 console.log(`🔄 Triggering balance recalculation for backdated debit transaction (${dateValidation.daysDifference} days back)`);
-
-                // Use setImmediate to avoid blocking the response
-                setImmediate(async () => {
-                    try {
-                        await this.triggerBalanceRecalculation(logEntry, dateValidation);
-                    } catch (error) {
-                        console.error('❌ Error in background balance recalculation:', error);
-                    }
-                });
+            } else {
+                console.log(`🔄 Triggering snapshot update for current debit transaction`);
             }
+
+            // Use setImmediate to avoid blocking the response
+            setImmediate(async () => {
+                try {
+                    await this.triggerBalanceRecalculation(logEntry, dateValidation);
+                } catch (error) {
+                    console.error('❌ Error in background balance recalculation:', error);
+                }
+            });
 
             console.log('✅ Immutable debit transaction created:', logEntry.transaction_uuid);
 
@@ -254,6 +258,7 @@ class ImmutableTransactionService {
         return {
             account_id: parseInt(data.account_id),
             ledger_head_id: parseInt(data.ledger_head_id),
+            source_ledger_head_id: data.source_ledger_head_id ? parseInt(data.source_ledger_head_id) : null,
             amount: amount,
             cash_amount: cashAmount,
             bank_amount: bankAmount,
@@ -444,6 +449,7 @@ class ImmutableTransactionService {
             approval_level: dateValidation.approvalLevel,
             date_override_reason: dateValidation.dateOverrideReason || null
         };
+
 
         // Generate cryptographic hash
         logData.current_hash = hashChainService.generateTransactionHash(logData, previousHash);
@@ -761,7 +767,18 @@ class ImmutableTransactionService {
                 }
             }) || 0;
 
-            return credits - debits;
+            // CRITICAL FIX: Also account for debit transactions from OTHER ledgers that use this ledger as source
+            // This handles cases where money is spent from this ledger through expense transactions
+            const sourceDeductions = await db.TransactionLog.sum('amount', {
+                where: {
+                    account_id: accountId,
+                    source_ledger_head_id: ledgerHeadId, // This ledger is used as source
+                    tx_type: 'debit',
+                    transaction_date: { [Op.lte]: asOfDate }
+                }
+            }) || 0;
+
+            return credits - debits - sourceDeductions;
         }
 
         // For current balance, get it directly from ledger head (more efficient)
@@ -978,37 +995,31 @@ class ImmutableTransactionService {
      */
     async updateMonthlyBalanceSummaries(logEntry, dateValidation) {
         try {
-            // Get the monthly report service if available
-            const monthlyReportService = require('./monthlyReportService');
+            // AUTOMATIC SNAPSHOT TRIGGER INTEGRATION
+            // This ensures that ANY backdated transaction automatically updates historical snapshots
+            const autoSnapshotTrigger = require('../auto-snapshot-trigger');
 
-            // Identify all months that need recalculation
-            const transactionDate = new Date(logEntry.transaction_date);
-            const currentDate = new Date();
+            // Determine affected ledger heads for this transaction
+            const affectedLedgerIds = [logEntry.ledger_head_id];
 
-            console.log(`🔄 Updating monthly summaries from ${transactionDate.toISOString().substr(0, 7)} to ${currentDate.toISOString().substr(0, 7)}`);
-
-            // Recalculate month-by-month to ensure cascading updates
-            let processingDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), 1);
-            const endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-
-            while (processingDate <= endDate) {
-                const year = processingDate.getFullYear();
-                const month = processingDate.getMonth() + 1;
-
-                console.log(`🔄 Recalculating monthly summary for ${year}-${month.toString().padStart(2, '0')}`);
-
-                // Use the monthly report service to recalculate this month
-                await monthlyReportService.generateMonthlyReport(logEntry.account_id, year, month);
-
-                // Move to next month
-                processingDate.setMonth(processingDate.getMonth() + 1);
+            // For debit transactions, also include the source ledger
+            if (logEntry.source_ledger_head_id && !affectedLedgerIds.includes(logEntry.source_ledger_head_id)) {
+                affectedLedgerIds.push(logEntry.source_ledger_head_id);
             }
 
-            console.log(`✅ Monthly balance summaries updated successfully`);
+            // Trigger automatic snapshot updates for affected months
+            await autoSnapshotTrigger.triggerSnapshotUpdatesForBackdatedTransaction(
+                logEntry.account_id,
+                logEntry.transaction_date,
+                affectedLedgerIds
+            );
+
+            console.log(`✅ Automatic snapshot updates completed for transaction ${logEntry.transaction_uuid}`);
 
         } catch (error) {
-            console.error('❌ Error updating monthly balance summaries:', error);
-            // Don't throw - this is a fallback system
+            console.error('❌ Error in automatic snapshot updates:', error);
+            // Don't throw - this is a background process
+            // Log it for monitoring but don't fail the main transaction
         }
     }
 

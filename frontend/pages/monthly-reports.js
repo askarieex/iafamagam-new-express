@@ -35,12 +35,24 @@ export default function MonthlyReports() {
     const [error, setError] = useState(null);
     const [reportData, setReportData] = useState(null);
     const [availableMonths, setAvailableMonths] = useState([]);
+    const [isCurrentMonth, setIsCurrentMonth] = useState(true);
+    const [snapshotGenerating, setSnapshotGenerating] = useState(false);
 
     // Fetch accounts on component mount
     useEffect(() => {
         fetchAccounts();
         fetchAvailableMonths();
     }, []);
+
+    // Check if selected month is current month
+    useEffect(() => {
+        const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1;
+
+        const isCurrent = selectedYear === currentYear && selectedMonth === currentMonth;
+        setIsCurrentMonth(isCurrent);
+    }, [selectedYear, selectedMonth]);
 
     /**
      * Fetch all accounts
@@ -96,13 +108,14 @@ export default function MonthlyReports() {
 
             // Use account ID 1 as default - the backend will combine all accounts
             const response = await axios.get(
-                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/transactions/monthly-report/${selectedYear}/${selectedMonth}/1`,
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/reports/monthly/${selectedYear}/${selectedMonth}/1`,
                 {
                     params: {
                         regenerate: regenerate,
                         include_transactions: false,
                         save_results: true,
-                        all_accounts: true
+                        all_accounts: true,
+                        _t: Date.now() // Cache buster to prevent stale data
                     }
                 }
             );
@@ -122,6 +135,41 @@ export default function MonthlyReports() {
             console.error('❌ Report generation failed:', err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    /**
+     * Regenerate snapshots for historical months
+     */
+    const regenerateSnapshots = async () => {
+        if (isCurrentMonth) {
+            toast.warning('Cannot regenerate snapshots for current month');
+            return;
+        }
+
+        setSnapshotGenerating(true);
+
+        try {
+            console.log(`🔄 Regenerating snapshots for ${selectedYear}-${selectedMonth}`);
+
+            const response = await axios.post(
+                `${API_CONFIG.BASE_URL}${API_CONFIG.API_PREFIX}/reports/regenerate-snapshots/1/${selectedYear}/${selectedMonth}`
+            );
+
+            if (response.data.success) {
+                toast.success('Snapshots regenerated successfully');
+                // Regenerate the report after snapshots are updated
+                generateMonthlyReport(true);
+            } else {
+                throw new Error(response.data.message || 'Failed to regenerate snapshots');
+            }
+
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message || 'Failed to regenerate snapshots';
+            toast.error(errorMessage);
+            console.error('❌ Snapshot regeneration failed:', err);
+        } finally {
+            setSnapshotGenerating(false);
         }
     };
 
@@ -209,7 +257,7 @@ export default function MonthlyReports() {
                         </div>
 
                         {/* Generate Button */}
-                        <div className="flex flex-col justify-end">
+                        <div className="flex flex-col justify-end space-y-2">
                             <button
                                 onClick={() => generateMonthlyReport()}
                                 disabled={loading}
@@ -231,6 +279,40 @@ export default function MonthlyReports() {
                                     </>
                                 )}
                             </button>
+
+                            {/* Report Type Indicator */}
+                            <div className={`text-xs text-center px-2 py-1 rounded ${
+                                isCurrentMonth
+                                    ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                    : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
+                            }`}>
+                                {isCurrentMonth ? '📊 Real-time Report' : '📂 Historical Report'}
+                            </div>
+
+                            {/* Regenerate Snapshots Button - Only for historical months */}
+                            {!isCurrentMonth && (
+                                <button
+                                    onClick={regenerateSnapshots}
+                                    disabled={snapshotGenerating || loading}
+                                    className={`w-full px-3 py-1.5 text-xs rounded-lg font-medium flex items-center justify-center ${
+                                        snapshotGenerating || loading
+                                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                            : 'bg-yellow-500 text-white hover:bg-yellow-600'
+                                    } transition-colors duration-200`}
+                                >
+                                    {snapshotGenerating ? (
+                                        <>
+                                            <FaSpinner className="animate-spin mr-1" />
+                                            Updating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <FaSync className="mr-1" />
+                                            Update Snapshots
+                                        </>
+                                    )}
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -282,6 +364,9 @@ export default function MonthlyReports() {
                     reportData={reportData}
                     formatCurrency={formatCurrency}
                     onRegenerateReport={() => generateMonthlyReport(true)}
+                    isCurrentMonth={isCurrentMonth}
+                    selectedYear={selectedYear}
+                    selectedMonth={selectedMonth}
                 />
             )}
         </div>
@@ -291,7 +376,7 @@ export default function MonthlyReports() {
 /**
  * Monthly Report Display Component
  */
-function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport }) {
+function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport, isCurrentMonth, selectedYear, selectedMonth }) {
     return (
         <div className="space-y-6">
             {/* Report Header */}
@@ -303,6 +388,28 @@ function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport }
                     <h3 className="text-sm font-medium opacity-90">
                         {reportData.account_display_name || 'ALL ACCOUNTS COMBINED'}
                     </h3>
+                </div>
+
+                {/* Report Metadata */}
+                <div className={`px-6 py-2 text-center text-sm ${
+                    isCurrentMonth
+                        ? 'bg-green-50 text-green-800 dark:bg-green-900 dark:text-green-200'
+                        : 'bg-orange-50 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
+                }`}>
+                    {isCurrentMonth
+                        ? '📊 Real-time Report (Current Month)'
+                        : '📂 Historical Report (Snapshot-based)'
+                    }
+                    {reportData.report_metadata?.generation_time && (
+                        <span className="ml-4 opacity-75">
+                            Generated: {new Date(reportData.report_metadata.generation_time).toLocaleString()}
+                        </span>
+                    )}
+                    {reportData.report_metadata?.is_historical && (
+                        <span className="ml-4 opacity-75">
+                            • Using {reportData.report_metadata.report_type || 'snapshot'} data
+                        </span>
+                    )}
                 </div>
 
                 {/* Report Summary */}
@@ -459,7 +566,7 @@ function MonthlyReportDisplay({ reportData, formatCurrency, onRegenerateReport }
                                                     <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
                                                         {debitHead ? formatCurrency(debitHead.closing_balance) : ''}
                                                     </td>
-                                                    {/* Balance and Cash columns */}
+                                                    {/* Balance and Cash columns - only for credit heads */}
                                                     <td className="px-3 py-2 text-sm text-gray-900 dark:text-white text-center border border-gray-300">
                                                         {creditHead ? formatCurrency(creditHead.closing_balance) : ''}
                                                     </td>

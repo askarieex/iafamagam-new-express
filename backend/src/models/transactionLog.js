@@ -256,6 +256,14 @@ module.exports = (sequelize) => {
             type: DataTypes.TEXT,
             allowNull: true
         },
+        source_ledger_head_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            references: {
+                model: 'ledger_heads',
+                key: 'id'
+            }
+        },
         reference_log_id: {
             type: DataTypes.BIGINT,
             allowNull: true,
